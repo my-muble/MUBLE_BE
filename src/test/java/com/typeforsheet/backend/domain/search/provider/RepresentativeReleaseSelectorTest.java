@@ -159,4 +159,53 @@ class RepresentativeReleaseSelectorTest {
 
     assertNull(RepresentativeReleaseSelector.select(recording));
   }
+
+  @Test
+  void prefersRegularAlbumWhenArtistCreditIsMissing() {
+
+    JsonNode recording =
+        mapper.readTree(
+            """
+                {
+                  "artist-credit": [
+                    {
+                      "artist": {
+                        "id": "iu-artist-id"
+                      }
+                    }
+                  ],
+                  "releases": [
+                    {
+                      "title": "Compilation",
+                      "status": "Official",
+                      "artist-credit": [
+                        {
+                          "artist": {
+                            "id": "iu-artist-id"
+                          }
+                        }
+                      ],
+                      "release-group": {
+                        "id": "compilation-id",
+                        "primary-type": "Album",
+                        "secondary-types": ["Compilation"]
+                      }
+                    },
+                    {
+                      "title": "Palette",
+                      "status": "Official",
+                      "release-group": {
+                        "id": "palette-id",
+                        "primary-type": "Album"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+    RepresentativeReleaseSelector.SelectedRelease result =
+        RepresentativeReleaseSelector.select(recording);
+
+    assertEquals("palette-id", result.releaseGroupId());
+  }
 }

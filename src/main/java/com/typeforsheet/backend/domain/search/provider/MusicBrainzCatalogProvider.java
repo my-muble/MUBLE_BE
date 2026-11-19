@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -36,7 +37,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
   private final String baseUrl;
   private final String userAgent;
 
-  private final Object requestLock = new Object();
+  private final ReentrantLock requestLock = new ReentrantLock();
 
   private final Map<String, CachedResponse> cache = new ConcurrentHashMap<>();
 
@@ -187,7 +188,22 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       return cached.body();
     }
 
-    synchronized (requestLock) {
+    boolean acquired;
+
+    try {
+      acquired = requestLock.tryLock(2, TimeUnit.SECONDS);
+
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+    }
+
+    if (!acquired) {
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    }
+
+    try {
       cached = cache.get(url);
 
       if (isValid(cached)) {
@@ -237,6 +253,9 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       } catch (Exception exception) {
         throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
       }
+
+    } finally {
+      requestLock.unlock();
     }
   }
 
@@ -317,6 +336,12 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
 
         if (name != null) {
           builder.append(name);
+        }
+
+        JsonNode joinphrase = credit.path("joinphrase");
+
+        if (joinphrase.isTextual()) {
+          builder.append(joinphrase.asText());
         }
       }
     }

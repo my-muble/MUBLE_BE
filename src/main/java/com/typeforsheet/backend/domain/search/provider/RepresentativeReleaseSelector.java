@@ -62,7 +62,7 @@ final class RepresentativeReleaseSelector {
     JsonNode group = release.path("release-group");
 
     if (!hasExcludedSecondaryType(group)) {
-      score += 100;
+      score += 300;
     }
 
     String primaryType = value(group, "primary-type");

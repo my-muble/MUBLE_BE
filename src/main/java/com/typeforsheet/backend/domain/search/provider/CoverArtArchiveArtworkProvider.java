@@ -19,6 +19,10 @@ public class CoverArtArchiveArtworkProvider implements AlbumArtworkProvider {
 
   private static final long FAILURE_CACHE_NANOS = TimeUnit.MINUTES.toNanos(1);
 
+  private static final int MAX_CACHE_ENTRIES = 500;
+
+  private final Object cacheLock = new Object();
+
   private final HttpClient client;
   private final boolean enabled;
   private final String baseUrl;
@@ -54,16 +58,45 @@ public class CoverArtArchiveArtworkProvider implements AlbumArtworkProvider {
 
     String url = baseUrl + "/release-group/" + normalized + "/front-250";
 
-    CacheEntry entry =
-        cache.compute(
-            normalized,
-            (key, old) -> {
-              if (old != null && System.nanoTime() - old.expiresAtNanos() < 0) {
-                return old;
-              }
+    CacheEntry entry;
 
-              return checkAvailability(url);
-            });
+    synchronized (cacheLock) {
+      long now = System.nanoTime();
+
+      // 만료된 항목 제거
+      cache.entrySet().removeIf(item -> now - item.getValue().expiresAtNanos() >= 0);
+
+      // 유효한 항목은 재사용하고 없으면 다시 조회
+      entry =
+          cache.compute(
+              normalized,
+              (key, old) -> {
+                if (old != null && System.nanoTime() - old.expiresAtNanos() < 0) {
+                  return old;
+                }
+
+                return checkAvailability(url);
+              });
+
+      // 최대 500개 제한
+      if (cache.size() > MAX_CACHE_ENTRIES) {
+        String evictionKey = null;
+        long earliestExpiry = Long.MAX_VALUE;
+
+        for (var item : cache.entrySet()) {
+          long expiry = item.getValue().expiresAtNanos();
+
+          if (expiry < earliestExpiry) {
+            earliestExpiry = expiry;
+            evictionKey = item.getKey();
+          }
+        }
+
+        if (evictionKey != null) {
+          cache.remove(evictionKey);
+        }
+      }
+    }
 
     return entry.available() ? url : null;
   }
