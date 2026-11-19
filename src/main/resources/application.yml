@@ -29,3 +29,12 @@ app:
       app-id: ${KAKAO_APP_ID:}
     apple:
       client-ids: ${APPLE_CLIENT_IDS:}
+
+  music:
+    musicbrainz:
+      base-url: https://musicbrainz.org
+      user-agent: "${MUSICBRAINZ_USER_AGENT:MUBLE/0.1 (https://github.com/TypeForSheet/TypeForSheet_BE)}"
+
+    artwork:
+      enabled: ${MUSIC_ARTWORK_ENABLED:false}
+      caa-base-url: https://coverartarchive.org

@@ -31,6 +31,8 @@ public enum ErrorCode {
 
   APPLE_LOGIN_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Apple 로그인을 사용할 수 없습니다."),
 
+  MUSIC_CATALOG_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "외부 음악 검색 서비스를 사용할 수 없습니다."),
+
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
 
   private final HttpStatus status;
