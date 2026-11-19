@@ -4,6 +4,7 @@ import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Artist;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.SearchPage;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Track;
+import com.typeforsheet.backend.domain.search.dto.response.UnifiedMusicSearchResponse;
 import com.typeforsheet.backend.domain.search.provider.AlbumArtworkProvider;
 import com.typeforsheet.backend.domain.search.provider.MusicCatalogProvider;
 import com.typeforsheet.backend.global.exception.BusinessException;
@@ -47,6 +48,16 @@ public class MusicSearchService {
 
     this.catalogProvider = catalogProvider;
     this.artworkProvider = artworkProvider;
+  }
+
+  public UnifiedMusicSearchResponse searchAll(String query, int limit, int offset) {
+    SearchPage<Track> tracks = searchTracks(query, limit, offset);
+
+    SearchPage<Album> albums = searchAlbums(query, limit, offset);
+
+    SearchPage<Artist> artists = searchArtists(query, limit, offset);
+
+    return new UnifiedMusicSearchResponse(tracks, albums, artists);
   }
 
   public SearchPage<Track> searchTracks(String query, int limit, int offset) {

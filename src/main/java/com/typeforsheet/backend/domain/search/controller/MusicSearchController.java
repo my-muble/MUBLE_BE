@@ -4,6 +4,7 @@ import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Artist;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.SearchPage;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Track;
+import com.typeforsheet.backend.domain.search.dto.response.UnifiedMusicSearchResponse;
 import com.typeforsheet.backend.domain.search.service.MusicSearchService;
 import com.typeforsheet.backend.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,6 +25,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class MusicSearchController {
 
   private final MusicSearchService musicSearchService;
+
+  @GetMapping
+  @Operation(summary = "통합 음악 검색", description = "곡, 앨범, 아티스트를 한 번에 검색합니다.")
+  public ApiResponse<UnifiedMusicSearchResponse> searchAll(
+      @Parameter(description = "검색어", example = "아이유") @RequestParam String query,
+      @Parameter(description = "유형별 최대 검색 결과 수 (1~20)") @RequestParam(defaultValue = "10")
+          int limit,
+      @Parameter(description = "유형별 검색 시작 위치") @RequestParam(defaultValue = "0") int offset) {
+
+    UnifiedMusicSearchResponse results = musicSearchService.searchAll(query, limit, offset);
+
+    return ApiResponse.success("통합 검색에 성공했습니다.", results);
+  }
 
   @Operation(
       summary = "곡 검색",
