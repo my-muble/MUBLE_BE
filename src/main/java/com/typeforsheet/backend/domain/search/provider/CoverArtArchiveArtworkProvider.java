@@ -5,8 +5,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +26,9 @@ public class CoverArtArchiveArtworkProvider implements AlbumArtworkProvider {
   private static final int MAX_CACHE_ENTRIES = 500;
 
   private final Object cacheLock = new Object();
+
+  private final ConcurrentHashMap<String, CompletableFuture<CacheEntry>> inFlight =
+      new ConcurrentHashMap<>();
 
   private final HttpClient client;
   private final boolean enabled;
@@ -58,47 +65,97 @@ public class CoverArtArchiveArtworkProvider implements AlbumArtworkProvider {
 
     String url = baseUrl + "/release-group/" + normalized + "/front-250";
 
-    CacheEntry entry;
+    CacheEntry entry = getValidCached(normalized);
 
-    synchronized (cacheLock) {
-      long now = System.nanoTime();
+    if (entry == null) {
+      CompletableFuture<CacheEntry> newTask = new CompletableFuture<>();
 
-      // 만료된 항목 제거
-      cache.entrySet().removeIf(item -> now - item.getValue().expiresAtNanos() >= 0);
+      CompletableFuture<CacheEntry> existingTask = inFlight.putIfAbsent(normalized, newTask);
 
-      // 유효한 항목은 재사용하고 없으면 다시 조회
-      entry =
-          cache.compute(
-              normalized,
-              (key, old) -> {
-                if (old != null && System.nanoTime() - old.expiresAtNanos() < 0) {
-                  return old;
-                }
+      if (existingTask == null) {
+        try {
+          // 다른 요청이 이미 캐시를 채웠을 수 있으므로 재확인
+          entry = getValidCached(normalized);
 
-                return checkAvailability(url);
-              });
-
-      // 최대 500개 제한
-      if (cache.size() > MAX_CACHE_ENTRIES) {
-        String evictionKey = null;
-        long earliestExpiry = Long.MAX_VALUE;
-
-        for (var item : cache.entrySet()) {
-          long expiry = item.getValue().expiresAtNanos();
-
-          if (expiry < earliestExpiry) {
-            earliestExpiry = expiry;
-            evictionKey = item.getKey();
+          if (entry == null) {
+            // HTTP 조회는 전역 잠금 밖에서 실행
+            entry = checkAvailability(url);
+            putCached(normalized, entry);
           }
+
+          newTask.complete(entry);
+
+        } catch (RuntimeException | Error exception) {
+          newTask.completeExceptionally(exception);
+          throw exception;
+
+        } finally {
+          inFlight.remove(normalized, newTask);
         }
 
-        if (evictionKey != null) {
-          cache.remove(evictionKey);
+      } else {
+        // 동일 ID를 조회 중인 요청의 결과만 기다림
+        try {
+          entry = existingTask.join();
+
+        } catch (CompletionException exception) {
+          if (exception.getCause() instanceof RuntimeException cause) {
+            throw cause;
+          }
+
+          if (exception.getCause() instanceof Error cause) {
+            throw cause;
+          }
+
+          throw exception;
         }
       }
     }
 
     return entry.available() ? url : null;
+  }
+
+  private CacheEntry getValidCached(String key) {
+    CacheEntry entry = cache.get(key);
+
+    if (entry == null) {
+      return null;
+    }
+
+    if (System.nanoTime() - entry.expiresAtNanos() >= 0) {
+      // 만료된 값만 조건부 제거해 새 캐시 값을 지우지 않음
+      cache.remove(key, entry);
+      return null;
+    }
+
+    return entry;
+  }
+
+  private void putCached(String key, CacheEntry entry) {
+    synchronized (cacheLock) {
+      long now = System.nanoTime();
+
+      // 기존 TTL 유지: 만료된 캐시 제거
+      cache.entrySet().removeIf(item -> now - item.getValue().expiresAtNanos() >= 0);
+
+      cache.put(key, entry);
+
+      // 최대 500개 유지
+      // 초과 시 만료 예정 시각이 가장 빠른 항목부터 제거
+      while (cache.size() > MAX_CACHE_ENTRIES) {
+        String evictionKey =
+            cache.entrySet().stream()
+                .min(Comparator.comparingLong(item -> item.getValue().expiresAtNanos()))
+                .map(Map.Entry::getKey)
+                .orElse(null);
+
+        if (evictionKey == null) {
+          break;
+        }
+
+        cache.remove(evictionKey);
+      }
+    }
   }
 
   private CacheEntry checkAvailability(String url) {

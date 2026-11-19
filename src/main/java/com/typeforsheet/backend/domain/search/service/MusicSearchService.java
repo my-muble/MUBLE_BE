@@ -107,32 +107,44 @@ public class MusicSearchService {
         String coverUrl = null;
 
         if (!interrupted && task != null) {
-          long remaining = deadline - System.nanoTime();
+          try {
+            if (task.isDone()) {
+              // 이미 완료된 작업은 기한이 지나도 결과 회수
+              coverUrl = task.get();
+            } else {
+              // 미완료 작업에만 남은 시간 적용
+              long remaining = deadline - System.nanoTime();
 
-          if (remaining > 0) {
-            try {
-              coverUrl = task.get(remaining, TimeUnit.NANOSECONDS);
-
-            } catch (InterruptedException exception) {
-              Thread.currentThread().interrupt();
-              interrupted = true;
-
-            } catch (ExecutionException | TimeoutException | CancellationException exception) {
-              coverUrl = null;
+              if (remaining > 0) {
+                coverUrl = task.get(remaining, TimeUnit.NANOSECONDS);
+              } else if (task.isDone()) {
+                // 기한 확인 중 작업이 완료된 경우에도 결과 유지
+                coverUrl = task.get();
+              }
             }
+
+          } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            interrupted = true;
+
+          } catch (ExecutionException | TimeoutException | CancellationException exception) {
+            coverUrl = null;
           }
         }
 
+        // 기존 검색 결과 순서 유지
         results.add(withCover.apply(originals.get(i), coverUrl));
       }
 
     } finally {
+      // 미완료 작업 취소
       for (Future<String> task : tasks) {
         if (task != null && !task.isDone()) {
           task.cancel(true);
         }
       }
 
+      // 취소된 작업을 대기열에서 제거
       artworkExecutor.purge();
     }
 
