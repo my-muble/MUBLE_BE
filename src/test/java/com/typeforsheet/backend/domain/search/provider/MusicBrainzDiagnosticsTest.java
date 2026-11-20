@@ -85,9 +85,9 @@ class MusicBrainzDiagnosticsTest {
         "/ws/2/",
         exchange -> {
           int call = count.incrementAndGet();
-          int status = call == 1 ? 429 : call == 2 ? 503 : 200;
+          int status = call == 1 ? 429 : call == 2 || call == 3 ? 503 : 200;
           String body =
-              call == 3
+              call == 4
                   ? "{sensitive-response"
                   : "{\"id\":\"a1234567-1234-1234-1234-123456789abc\"}";
           byte[] bytes = body.getBytes(StandardCharsets.UTF_8);

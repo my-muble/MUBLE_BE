@@ -15,12 +15,19 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -40,6 +47,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
 
   private static final long REQUEST_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 
+  private static final long REQUEST_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(10);
+
+  private static final Duration MAX_RETRY_AFTER = Duration.ofSeconds(3);
+
   private final HttpClient client;
   private final JsonMapper mapper;
   private final String baseUrl;
@@ -50,6 +61,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
   private final Map<String, CachedResponse> cache = new ConcurrentHashMap<>();
 
   private long nextAllowedNanos;
+
+  private Instant serverCooldownUntil = Instant.EPOCH;
 
   public MusicBrainzCatalogProvider(
       JsonMapper mapper,
@@ -63,7 +76,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     this.client =
         HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
   }
 
@@ -397,179 +410,357 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       return cached.body();
     }
 
-    boolean acquired;
     String operation = lookup ? "lookup" : search ? "search" : "browse";
-    long lockStart = System.nanoTime();
-
-    try {
-      acquired = requestLock.tryLock(2, TimeUnit.SECONDS);
-
-    } catch (InterruptedException exception) {
-      Thread.currentThread().interrupt();
-
-      log.warn(
-          "MusicBrainz failure reason=lock_interrupted operation={} lock_wait_ms={} exception_type={}",
-          operation,
-          elapsedMillis(lockStart),
-          exception.getClass().getSimpleName());
-
-      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
-    }
-
-    if (!acquired) {
-      log.warn(
-          "MusicBrainz failure reason=lock_timeout operation={} lock_wait_ms={}",
-          operation,
-          elapsedMillis(lockStart));
-      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
-    }
-
-    long lockWaitMillis = elapsedMillis(lockStart);
-
-    try {
-      cached = cache.get(url);
-
-      if (isValid(cached)) {
-        return cached.body();
-      }
-
+    long deadline = 0;
+    int attempts = 0;
+    int redirects = 0;
+    int requests = 0;
+    URI currentUri = URI.create(url);
+    Set<URI> visited = new HashSet<>();
+    visited.add(currentUri.normalize());
+    while (true) {
+      int attempt = attempts + 1;
+      long waitStart = System.nanoTime();
+      long waitBudget = requests == 0 ? TimeUnit.SECONDS.toNanos(4) : deadline - System.nanoTime();
+      acquireRequestTurn(url, operation, waitBudget);
+      long lockWaitMillis = elapsedMillis(waitStart);
       try {
-        waitForRequestSlot();
-      } catch (BusinessException exception) {
-        log.warn(
-            "MusicBrainz failure reason=rate_wait_interrupted operation={} lock_wait_ms={} exception_type=InterruptedException",
-            operation,
-            lockWaitMillis);
-        throw exception;
-      }
+        cached = cache.get(url);
+        if (isValid(cached)) return cached.body();
+        if (requests == 0) deadline = System.nanoTime() + REQUEST_BUDGET_NANOS;
 
-      HttpRequest request =
-          HttpRequest.newBuilder(URI.create(url))
-              .timeout(Duration.ofSeconds(8))
-              .header("User-Agent", userAgent)
-              .header("Accept", "application/json")
-              .GET()
-              .build();
-
-      long requestStart = System.nanoTime();
-      try {
-        HttpResponse<String> response =
-            client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
-        if (lookup && response.statusCode() == 404) {
-          return null;
-        }
-
-        if (search && response.statusCode() == 400) {
-          throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        }
-
-        if (response.statusCode() != 200) {
+        long remainingBudget = deadline - System.nanoTime();
+        if (requests > 0 && remainingBudget <= 0) {
           log.warn(
-              "MusicBrainz failure reason=http_status operation={} http_status={} lock_wait_ms={} request_elapsed_ms={}",
+              "MusicBrainz failure reason=retry_budget_exhausted operation={} attempt={} lock_wait_ms={}",
               operation,
-              response.statusCode(),
-              lockWaitMillis,
-              elapsedMillis(requestStart));
+              attempt,
+              lockWaitMillis);
           throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
         }
+        long timeoutNanos =
+            requests == 0
+                ? TimeUnit.SECONDS.toNanos(8)
+                : Math.min(TimeUnit.SECONDS.toNanos(8), remainingBudget);
+        HttpRequest request =
+            HttpRequest.newBuilder(currentUri)
+                .timeout(Duration.ofNanos(timeoutNanos))
+                .header("User-Agent", userAgent)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
 
-        JsonNode body;
+        long requestStart = System.nanoTime();
         try {
-          body = mapper.readTree(response.body());
+          HttpResponse<String> response =
+              client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+          requests++;
+
+          int status = response.statusCode();
+          if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+            if (++redirects > 3 || response.headers().allValues("Location").size() != 1) {
+              throw invalidRedirect(operation, status);
+            }
+            URI target;
+            try {
+              target =
+                  currentUri
+                      .resolve(response.headers().firstValue("Location").orElseThrow())
+                      .normalize();
+            } catch (IllegalArgumentException exception) {
+              throw invalidRedirect(operation, status);
+            }
+            if (!sameOrigin(URI.create(baseUrl), target)
+                || target.getUserInfo() != null
+                || target.getFragment() != null
+                || target.getPath() == null
+                || target.getRawPath().contains("%")
+                || !target.getPath().startsWith("/ws/2/")
+                || !sameResource(URI.create(url), target)
+                || !visited.add(target)) {
+              throw invalidRedirect(operation, status);
+            }
+            currentUri = target;
+            continue;
+          }
+
+          if (lookup && response.statusCode() == 404) {
+            return null;
+          }
+
+          if (search && response.statusCode() == 400) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+          }
+
+          RetryAfter retryAfter = parseRetryAfter(response.headers().allValues("Retry-After"));
+          if ((response.statusCode() == 503 || response.statusCode() == 429)
+              && retryAfter.valid()
+              && retryAfter.until().isAfter(serverCooldownUntil)) {
+            serverCooldownUntil = retryAfter.until();
+          }
+          if (response.statusCode() == 503
+              && attempt == 1
+              && (!retryAfter.present() || retryAfter.valid())) {
+            Duration delay =
+                retryAfter.valid() ? remainingCooldown(retryAfter.until()) : Duration.ZERO;
+            long slotWait = Math.max(0L, nextAllowedNanos - System.nanoTime());
+            if (delay.compareTo(MAX_RETRY_AFTER) <= 0
+                && deadline - System.nanoTime() > Math.max(delay.toNanos(), slotWait)) {
+              log.warn(
+                  "MusicBrainz failure reason=http_status operation={} http_status=503 attempt={} outcome=retry retry_after_ms={} lock_wait_ms={} request_elapsed_ms={}",
+                  operation,
+                  attempt,
+                  delay.toMillis(),
+                  lockWaitMillis,
+                  elapsedMillis(requestStart));
+              attempts++;
+              continue;
+            }
+          }
+
+          if (response.statusCode() != 200) {
+            log.warn(
+                "MusicBrainz failure reason=http_status operation={} http_status={} attempt={} outcome=final retry_after_ms={} lock_wait_ms={} request_elapsed_ms={}",
+                operation,
+                response.statusCode(),
+                attempt,
+                retryAfter.valid() ? safeMillis(remainingCooldown(retryAfter.until())) : -1,
+                lockWaitMillis,
+                elapsedMillis(requestStart));
+            throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+          }
+
+          JsonNode body;
+          try {
+            body = mapper.readTree(response.body());
+          } catch (Exception exception) {
+            log.warn(
+                "MusicBrainz failure reason=response_parse operation={} http_status={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+                operation,
+                response.statusCode(),
+                attempt,
+                lockWaitMillis,
+                elapsedMillis(requestStart),
+                exception.getClass().getSimpleName());
+            throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+          }
+
+          if (lookup) {
+            String returnedId = value(body, "id");
+            String path = response.uri().getPath();
+            if (returnedId == null || !path.endsWith("/" + returnedId)) {
+              log.warn(
+                  "MusicBrainz failure reason=lookup_id_mismatch operation={} http_status={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={}",
+                  operation,
+                  response.statusCode(),
+                  attempt,
+                  lockWaitMillis,
+                  elapsedMillis(requestStart));
+              throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+            }
+          }
+
+          if (cache.size() >= 500) {
+            cache.clear();
+          }
+
+          cache.put(url, new CachedResponse(body, System.nanoTime() + CACHE_NANOS));
+
+          if (attempt > 1) {
+            log.info(
+                "MusicBrainz retry outcome=success operation={} http_status=200 attempt={} lock_wait_ms={} request_elapsed_ms={}",
+                operation,
+                attempt,
+                lockWaitMillis,
+                elapsedMillis(requestStart));
+          }
+
+          return body;
+
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+
+          log.warn(
+              "MusicBrainz failure reason=request_interrupted operation={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+              operation,
+              attempt,
+              lockWaitMillis,
+              elapsedMillis(requestStart),
+              exception.getClass().getSimpleName());
+
+          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+
+        } catch (BusinessException exception) {
+          throw exception;
+
+        } catch (HttpTimeoutException exception) {
+          log.warn(
+              "MusicBrainz failure reason=request_timeout operation={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+              operation,
+              attempt,
+              lockWaitMillis,
+              elapsedMillis(requestStart),
+              exception.getClass().getSimpleName());
+          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+
         } catch (Exception exception) {
           log.warn(
-              "MusicBrainz failure reason=response_parse operation={} http_status={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+              "MusicBrainz failure reason=request_exception operation={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={} exception_type={}",
               operation,
-              response.statusCode(),
+              attempt,
               lockWaitMillis,
               elapsedMillis(requestStart),
               exception.getClass().getSimpleName());
           throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
         }
-
-        if (lookup) {
-          String returnedId = value(body, "id");
-          String path = response.uri().getPath();
-          if (returnedId == null || !path.endsWith("/" + returnedId)) {
-            log.warn(
-                "MusicBrainz failure reason=lookup_id_mismatch operation={} http_status={} lock_wait_ms={} request_elapsed_ms={}",
-                operation,
-                response.statusCode(),
-                lockWaitMillis,
-                elapsedMillis(requestStart));
-            throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
-          }
-        }
-
-        if (cache.size() >= 500) {
-          cache.clear();
-        }
-
-        cache.put(url, new CachedResponse(body, System.nanoTime() + CACHE_NANOS));
-
-        return body;
-
-      } catch (InterruptedException exception) {
-        Thread.currentThread().interrupt();
-
-        log.warn(
-            "MusicBrainz failure reason=request_interrupted operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
-            operation,
-            lockWaitMillis,
-            elapsedMillis(requestStart),
-            exception.getClass().getSimpleName());
-
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
-
-      } catch (BusinessException exception) {
-        throw exception;
-
-      } catch (HttpTimeoutException exception) {
-        log.warn(
-            "MusicBrainz failure reason=request_timeout operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
-            operation,
-            lockWaitMillis,
-            elapsedMillis(requestStart),
-            exception.getClass().getSimpleName());
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
-
-      } catch (Exception exception) {
-        log.warn(
-            "MusicBrainz failure reason=request_exception operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
-            operation,
-            lockWaitMillis,
-            elapsedMillis(requestStart),
-            exception.getClass().getSimpleName());
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+      } finally {
+        requestLock.unlock();
       }
-
-    } finally {
-      requestLock.unlock();
     }
+  }
+
+  private BusinessException invalidRedirect(String operation, int status) {
+    log.warn(
+        "MusicBrainz failure reason=redirect_rejected operation={} http_status={} outcome=final",
+        operation,
+        status);
+    return new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+  }
+
+  private boolean sameOrigin(URI base, URI target) {
+    if (base.getHost() == null
+        || target.getHost() == null
+        || base.getScheme() == null
+        || target.getScheme() == null
+        || !("http".equalsIgnoreCase(base.getScheme())
+            || "https".equalsIgnoreCase(base.getScheme()))) return false;
+    return base.getScheme().equalsIgnoreCase(target.getScheme())
+        && base.getHost().equalsIgnoreCase(target.getHost())
+        && effectivePort(base) == effectivePort(target);
+  }
+
+  private int effectivePort(URI uri) {
+    if (uri.getPort() != -1) return uri.getPort();
+    return "https".equalsIgnoreCase(uri.getScheme())
+        ? 443
+        : "http".equalsIgnoreCase(uri.getScheme()) ? 80 : -1;
+  }
+
+  private boolean sameResource(URI original, URI target) {
+    String prefix = "/ws/2/";
+    if (!original.getPath().startsWith(prefix) || !target.getPath().startsWith(prefix))
+      return false;
+    String originalResource = original.getPath().substring(prefix.length()).split("/", 2)[0];
+    String targetResource = target.getPath().substring(prefix.length()).split("/", 2)[0];
+    return !originalResource.isEmpty() && originalResource.equals(targetResource);
   }
 
   private long elapsedMillis(long startedNanos) {
     return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
   }
 
-  private void waitForRequestSlot() {
-
-    long remaining = nextAllowedNanos - System.nanoTime();
-
-    if (remaining > 0) {
+  private void acquireRequestTurn(String url, String operation, long waitBudget) {
+    long start = System.nanoTime();
+    while (true) {
+      long remaining = waitBudget - (System.nanoTime() - start);
+      if (remaining <= 0) {
+        log.warn(
+            "MusicBrainz failure reason=turn_timeout operation={} lock_wait_ms={}",
+            operation,
+            elapsedMillis(start));
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      }
       try {
-        TimeUnit.NANOSECONDS.sleep(remaining);
-
+        if (!requestLock.tryLock(
+            Math.min(remaining, TimeUnit.SECONDS.toNanos(2)), TimeUnit.NANOSECONDS)) {
+          log.warn(
+              "MusicBrainz failure reason=lock_timeout operation={} lock_wait_ms={}",
+              operation,
+              elapsedMillis(start));
+          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+        }
       } catch (InterruptedException exception) {
         Thread.currentThread().interrupt();
-
+        log.warn(
+            "MusicBrainz failure reason=lock_interrupted operation={} lock_wait_ms={} exception_type={}",
+            operation,
+            elapsedMillis(start),
+            exception.getClass().getSimpleName());
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+      }
+      if (isValid(cache.get(url))) return;
+      Duration cooldown = remainingCooldown(serverCooldownUntil);
+      remaining = waitBudget - (System.nanoTime() - start);
+      if (remaining <= 0 || cooldown.compareTo(Duration.ofNanos(remaining)) >= 0) {
+        requestLock.unlock();
+        log.warn(
+            "MusicBrainz failure reason=server_cooldown operation={} retry_after_ms={} lock_wait_ms={}",
+            operation,
+            safeMillis(cooldown),
+            elapsedMillis(start));
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      }
+      long delay = Math.max(Math.max(0L, nextAllowedNanos - System.nanoTime()), cooldown.toNanos());
+      if (delay == 0) {
+        nextAllowedNanos = System.nanoTime() + REQUEST_INTERVAL_NANOS;
+        return;
+      }
+      requestLock.unlock();
+      if (delay >= remaining) {
+        log.warn(
+            "MusicBrainz failure reason=turn_timeout operation={} lock_wait_ms={}",
+            operation,
+            elapsedMillis(start));
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      }
+      try {
+        TimeUnit.NANOSECONDS.sleep(delay);
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        log.warn(
+            "MusicBrainz failure reason=rate_wait_interrupted operation={} lock_wait_ms={} exception_type={}",
+            operation,
+            elapsedMillis(start),
+            exception.getClass().getSimpleName());
         throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
       }
     }
-
-    nextAllowedNanos = System.nanoTime() + REQUEST_INTERVAL_NANOS;
   }
+
+  private RetryAfter parseRetryAfter(List<String> values) {
+    if (values.isEmpty()) return new RetryAfter(false, false, Instant.EPOCH);
+    if (values.size() != 1) return new RetryAfter(true, false, Instant.EPOCH);
+    String value = values.get(0).trim();
+    if (value.isEmpty()) return new RetryAfter(true, false, Instant.EPOCH);
+    if (value.chars().allMatch(ch -> ch >= '0' && ch <= '9')) {
+      try {
+        return new RetryAfter(true, true, Instant.now().plusSeconds(Long.parseLong(value)));
+      } catch (NumberFormatException | DateTimeException | ArithmeticException exception) {
+        return new RetryAfter(true, true, Instant.MAX);
+      }
+    }
+    try {
+      return new RetryAfter(
+          true, true, ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant());
+    } catch (DateTimeParseException exception) {
+      return new RetryAfter(true, false, Instant.EPOCH);
+    }
+  }
+
+  private Duration remainingCooldown(Instant until) {
+    Instant now = Instant.now();
+    return until.isAfter(now) ? Duration.between(now, until) : Duration.ZERO;
+  }
+
+  private long safeMillis(Duration duration) {
+    try {
+      return duration.toMillis();
+    } catch (ArithmeticException exception) {
+      return Long.MAX_VALUE;
+    }
+  }
+
+  private record RetryAfter(boolean present, boolean valid, Instant until) {}
 
   private boolean isValid(CachedResponse cached) {
     return cached != null && System.nanoTime() - cached.expiresAtNanos() < 0;
