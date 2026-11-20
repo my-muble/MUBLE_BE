@@ -182,6 +182,31 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
             + "&offset="
             + offset;
 
+    return requestUrl(url, false);
+  }
+
+  public boolean exists(String entity, String id) {
+    if (!"recording".equals(entity) && !"release-group".equals(entity)) {
+      throw new IllegalArgumentException("Unsupported MusicBrainz entity");
+    }
+    JsonNode body = requestUrl(baseUrl + "/ws/2/" + entity + "/" + id + "?fmt=json", true);
+    if (body == null) {
+      return false;
+    }
+    String returnedId = value(body, "id");
+    try {
+      if (returnedId == null
+          || !java.util.UUID.fromString(returnedId).toString().equals(returnedId)) {
+        throw new IllegalArgumentException("Invalid MusicBrainz response ID");
+      }
+    } catch (IllegalArgumentException exception) {
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+    }
+    return true;
+  }
+
+  private JsonNode requestUrl(String url, boolean lookup) {
+
     CachedResponse cached = cache.get(url);
 
     if (isValid(cached)) {
@@ -224,7 +249,11 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         HttpResponse<String> response =
             client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
-        if (response.statusCode() == 400) {
+        if (lookup && response.statusCode() == 404) {
+          return null;
+        }
+
+        if (!lookup && response.statusCode() == 400) {
           throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
 
@@ -233,6 +262,14 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         }
 
         JsonNode body = mapper.readTree(response.body());
+
+        if (lookup) {
+          String returnedId = value(body, "id");
+          String path = response.uri().getPath();
+          if (returnedId == null || !path.endsWith("/" + returnedId)) {
+            throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+          }
+        }
 
         if (cache.size() >= 500) {
           cache.clear();

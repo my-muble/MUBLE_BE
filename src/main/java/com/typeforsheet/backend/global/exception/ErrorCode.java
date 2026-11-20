@@ -33,6 +33,12 @@ public enum ErrorCode {
 
   MUSIC_CATALOG_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "외부 음악 검색 서비스를 사용할 수 없습니다."),
 
+  INVALID_MUSIC_ID(HttpStatus.BAD_REQUEST, "유효하지 않은 음악 외부 ID입니다."),
+
+  UNSUPPORTED_MUSIC_REFERENCE(HttpStatus.BAD_REQUEST, "지원하지 않는 음악 외부 ID 유형입니다."),
+
+  MUSIC_EXTERNAL_ID_NOT_FOUND(HttpStatus.NOT_FOUND, "외부 음악을 찾을 수 없습니다."),
+
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
 
   private final HttpStatus status;
