@@ -664,6 +664,9 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         client.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     try {
       return response.get(timeoutNanos, TimeUnit.NANOSECONDS);
+    } catch (InterruptedException exception) {
+      response.cancel(true);
+      throw exception;
     } catch (TimeoutException exception) {
       response.cancel(true);
       throw exception;
