@@ -13,6 +13,7 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,6 +24,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -30,6 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 @Component
 public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
+
+  private static final Logger log = LoggerFactory.getLogger(MusicBrainzCatalogProvider.class);
 
   private static final long CACHE_NANOS = TimeUnit.MINUTES.toNanos(10);
 
@@ -203,6 +208,9 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         throw new IllegalArgumentException("Invalid MusicBrainz response ID");
       }
     } catch (IllegalArgumentException exception) {
+      log.warn(
+          "MusicBrainz failure reason=invalid_lookup_id operation=exists http_status=200 exception_type={}",
+          exception.getClass().getSimpleName());
       throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
     }
     return true;
@@ -232,8 +240,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     if (recording == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
     String recordingId = value(recording, "id");
     String title = value(recording, "title");
-    if (!validUuid(recordingId) || title == null)
-      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    if (!validUuid(recordingId) || title == null) throw invalidData("recording_metadata");
 
     List<JsonNode> releases = new ArrayList<>();
     int offset = 0;
@@ -249,8 +256,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
               false);
       JsonNode entries = page.path("releases");
       int count = page.path("release-count").asInt(-1);
-      if (!entries.isArray() || count < 0)
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      if (!entries.isArray() || count < 0) throw invalidData("recording_release_page");
       int size = 0;
       for (JsonNode release : entries) {
         if (validUuid(value(release, "id"))
@@ -259,7 +265,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       }
       offset += size;
       if (offset >= count) break;
-      if (size == 0) throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      if (size == 0) throw invalidData("recording_release_empty_page");
     }
     releases.sort(Comparator.comparing(release -> value(release, "id")));
     var selected = RepresentativeReleaseSelector.select(recording, releases);
@@ -281,8 +287,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     if (group == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
     String groupId = value(group, "id");
     String title = value(group, "title");
-    if (title == null || !validUuid(groupId))
-      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    if (title == null || !validUuid(groupId)) throw invalidData("release_group_metadata");
     List<JsonNode> releases = new ArrayList<>();
     int offset = 0;
     while (true) {
@@ -297,8 +302,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
               false);
       JsonNode entries = page.path("releases");
       int count = page.path("release-count").asInt(-1);
-      if (!entries.isArray() || count < 0)
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      if (!entries.isArray() || count < 0) throw invalidData("album_release_page");
       int size = 0;
       for (JsonNode release : entries) {
         releases.add(release);
@@ -306,7 +310,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       }
       offset += size;
       if (offset >= count) break;
-      if (size == 0) throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      if (size == 0) throw invalidData("album_release_empty_page");
     }
     Comparator<JsonNode> order =
         Comparator.comparingInt(
@@ -319,8 +323,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
             .filter(release -> validUuid(value(release, "id")))
             .min(order)
             .orElse(null);
-    if (!releases.isEmpty() && selected == null)
-      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    if (!releases.isEmpty() && selected == null) throw invalidData("album_release_selection");
     List<AlbumTrack> tracks = new ArrayList<>();
     if (selected != null) {
       String releaseId = value(selected, "id");
@@ -332,12 +335,11 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
                   + "?fmt=json&inc=recordings+artist-credits+media",
               true);
       if (release == null || !release.path("media").isArray())
-        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+        throw invalidData(release == null ? "album_release_not_found" : "album_release_media");
       int discIndex = 0;
       for (JsonNode medium : release.path("media")) {
         int discNumber = medium.path("position").asInt(++discIndex);
-        if (!medium.path("tracks").isArray())
-          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+        if (!medium.path("tracks").isArray()) throw invalidData("album_release_tracks");
         for (JsonNode track : medium.path("tracks")) {
           JsonNode recording = track.path("recording");
           String trackTitle = value(track, "title");
@@ -378,6 +380,11 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     }
   }
 
+  private BusinessException invalidData(String stage) {
+    log.warn("MusicBrainz failure reason=invalid_data stage={}", stage);
+    return new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+  }
+
   private JsonNode requestUrl(String url, boolean lookup) {
     return requestUrl(url, lookup, !lookup);
   }
@@ -391,6 +398,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     }
 
     boolean acquired;
+    String operation = lookup ? "lookup" : search ? "search" : "browse";
+    long lockStart = System.nanoTime();
 
     try {
       acquired = requestLock.tryLock(2, TimeUnit.SECONDS);
@@ -398,12 +407,24 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
 
+      log.warn(
+          "MusicBrainz failure reason=lock_interrupted operation={} lock_wait_ms={} exception_type={}",
+          operation,
+          elapsedMillis(lockStart),
+          exception.getClass().getSimpleName());
+
       throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
     }
 
     if (!acquired) {
+      log.warn(
+          "MusicBrainz failure reason=lock_timeout operation={} lock_wait_ms={}",
+          operation,
+          elapsedMillis(lockStart));
       throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
     }
+
+    long lockWaitMillis = elapsedMillis(lockStart);
 
     try {
       cached = cache.get(url);
@@ -412,7 +433,15 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         return cached.body();
       }
 
-      waitForRequestSlot();
+      try {
+        waitForRequestSlot();
+      } catch (BusinessException exception) {
+        log.warn(
+            "MusicBrainz failure reason=rate_wait_interrupted operation={} lock_wait_ms={} exception_type=InterruptedException",
+            operation,
+            lockWaitMillis);
+        throw exception;
+      }
 
       HttpRequest request =
           HttpRequest.newBuilder(URI.create(url))
@@ -422,6 +451,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
               .GET()
               .build();
 
+      long requestStart = System.nanoTime();
       try {
         HttpResponse<String> response =
             client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -435,15 +465,39 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         }
 
         if (response.statusCode() != 200) {
+          log.warn(
+              "MusicBrainz failure reason=http_status operation={} http_status={} lock_wait_ms={} request_elapsed_ms={}",
+              operation,
+              response.statusCode(),
+              lockWaitMillis,
+              elapsedMillis(requestStart));
           throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
         }
 
-        JsonNode body = mapper.readTree(response.body());
+        JsonNode body;
+        try {
+          body = mapper.readTree(response.body());
+        } catch (Exception exception) {
+          log.warn(
+              "MusicBrainz failure reason=response_parse operation={} http_status={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+              operation,
+              response.statusCode(),
+              lockWaitMillis,
+              elapsedMillis(requestStart),
+              exception.getClass().getSimpleName());
+          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+        }
 
         if (lookup) {
           String returnedId = value(body, "id");
           String path = response.uri().getPath();
           if (returnedId == null || !path.endsWith("/" + returnedId)) {
+            log.warn(
+                "MusicBrainz failure reason=lookup_id_mismatch operation={} http_status={} lock_wait_ms={} request_elapsed_ms={}",
+                operation,
+                response.statusCode(),
+                lockWaitMillis,
+                elapsedMillis(requestStart));
             throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
           }
         }
@@ -459,18 +513,44 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       } catch (InterruptedException exception) {
         Thread.currentThread().interrupt();
 
+        log.warn(
+            "MusicBrainz failure reason=request_interrupted operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+            operation,
+            lockWaitMillis,
+            elapsedMillis(requestStart),
+            exception.getClass().getSimpleName());
+
         throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
 
       } catch (BusinessException exception) {
         throw exception;
 
+      } catch (HttpTimeoutException exception) {
+        log.warn(
+            "MusicBrainz failure reason=request_timeout operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+            operation,
+            lockWaitMillis,
+            elapsedMillis(requestStart),
+            exception.getClass().getSimpleName());
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
+
       } catch (Exception exception) {
+        log.warn(
+            "MusicBrainz failure reason=request_exception operation={} lock_wait_ms={} request_elapsed_ms={} exception_type={}",
+            operation,
+            lockWaitMillis,
+            elapsedMillis(requestStart),
+            exception.getClass().getSimpleName());
         throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
       }
 
     } finally {
       requestLock.unlock();
     }
+  }
+
+  private long elapsedMillis(long startedNanos) {
+    return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
   }
 
   private void waitForRequestSlot() {
