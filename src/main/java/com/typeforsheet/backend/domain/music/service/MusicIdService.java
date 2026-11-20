@@ -6,7 +6,9 @@ import com.typeforsheet.backend.global.exception.BusinessException;
 import com.typeforsheet.backend.global.exception.ErrorCode;
 import java.util.Locale;
 import java.util.UUID;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -82,7 +84,7 @@ public class MusicIdService {
     }
     String alias = normalize(provider, externalId);
     String canonical = normalize(provider, canonicalId);
-    DataIntegrityViolationException lastConflict = null;
+    DataAccessException lastConflict = null;
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         return transaction.execute(
@@ -119,7 +121,7 @@ public class MusicIdService {
               }
               return item.getId();
             });
-      } catch (DataIntegrityViolationException conflict) {
+      } catch (DataIntegrityViolationException | PessimisticLockingFailureException conflict) {
         lastConflict = conflict;
       }
     }

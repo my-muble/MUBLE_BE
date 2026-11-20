@@ -10,9 +10,12 @@ import com.typeforsheet.backend.global.exception.BusinessException;
 import com.typeforsheet.backend.global.exception.ErrorCode;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,6 +51,40 @@ class MusicBrainzRetryAfterTest {
       } finally {
         server.stop(0);
       }
+    }
+  }
+
+  @Test
+  void waitsUntilHttpDateRetryAfterBeforeRetrying() throws Exception {
+    AtomicInteger calls = new AtomicInteger();
+    List<Long> times = new CopyOnWriteArrayList<>();
+    HttpServer server =
+        server(
+            exchange -> {
+              times.add(System.nanoTime());
+              int number = calls.incrementAndGet();
+              if (number == 1) {
+                Instant date = Instant.now().plusSeconds(3).truncatedTo(ChronoUnit.SECONDS);
+                exchange
+                    .getResponseHeaders()
+                    .add(
+                        "Retry-After",
+                        DateTimeFormatter.RFC_1123_DATE_TIME.format(
+                            ZonedDateTime.ofInstant(date, ZoneOffset.UTC)));
+              }
+              byte[] body = "{\"count\":0,\"recordings\":[]}".getBytes(StandardCharsets.UTF_8);
+              exchange.sendResponseHeaders(number == 1 ? 503 : 200, body.length);
+              exchange.getResponseBody().write(body);
+              exchange.close();
+            });
+    try {
+      assertTrue(provider(server).searchTracks("query", 10, 0).results().isEmpty());
+      assertEquals(2, calls.get());
+      assertTrue(
+          times.get(1) - times.get(0) >= Duration.ofMillis(1800).toNanos(),
+          "HTTP-date Retry-After must be honored beyond the normal one-second request interval");
+    } finally {
+      server.stop(0);
     }
   }
 
@@ -96,6 +133,7 @@ class MusicBrainzRetryAfterTest {
   @Test
   void retryCooldownDoesNotHoldLockAndConcurrentRequestsRespectInterval() throws Exception {
     AtomicInteger calls = new AtomicInteger();
+    AtomicInteger lockTimeouts = new AtomicInteger();
     List<Long> times = new CopyOnWriteArrayList<>();
     CountDownLatch retryScheduled = new CountDownLatch(1);
     HttpServer server =
@@ -103,7 +141,7 @@ class MusicBrainzRetryAfterTest {
             exchange -> {
               times.add(System.nanoTime());
               int number = calls.incrementAndGet();
-              if (number == 1) exchange.getResponseHeaders().add("Retry-After", "1");
+              if (number == 1) exchange.getResponseHeaders().add("Retry-After", "3");
               byte[] body = "{\"count\":0,\"recordings\":[]}".getBytes(StandardCharsets.UTF_8);
               exchange.sendResponseHeaders(number == 1 ? 503 : 200, body.length);
               exchange.getResponseBody().write(body);
@@ -115,6 +153,8 @@ class MusicBrainzRetryAfterTest {
           @Override
           protected void append(ILoggingEvent event) {
             if (event.getFormattedMessage().contains("outcome=retry")) retryScheduled.countDown();
+            if (event.getFormattedMessage().contains("reason=lock_timeout"))
+              lockTimeouts.incrementAndGet();
           }
         };
     appender.start();
@@ -124,12 +164,14 @@ class MusicBrainzRetryAfterTest {
       var provider = provider(server);
       Future<?> first = pool.submit(() -> provider.searchTracks("first", 10, 0));
       assertTrue(retryScheduled.await(5, TimeUnit.SECONDS));
+      Thread.sleep(200);
       Future<?> second = pool.submit(() -> provider.searchTracks("second", 10, 0));
       first.get(8, TimeUnit.SECONDS);
       second.get(8, TimeUnit.SECONDS);
       assertEquals(3, calls.get());
       assertTrue(times.get(1) - times.get(0) >= TimeUnit.MILLISECONDS.toNanos(900));
       assertTrue(times.get(2) - times.get(1) >= TimeUnit.MILLISECONDS.toNanos(900));
+      assertEquals(0, lockTimeouts.get(), "Cooldown wait must release requestLock");
     } finally {
       pool.shutdownNow();
       logger.detachAppender(appender);

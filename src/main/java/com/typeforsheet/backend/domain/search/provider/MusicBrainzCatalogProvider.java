@@ -13,7 +13,6 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -28,9 +27,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,6 +62,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
   private final ReentrantLock requestLock = new ReentrantLock();
 
   private final Map<String, CachedResponse> cache = new ConcurrentHashMap<>();
+
+  private final Map<String, Long> browseCacheExpirations = new ConcurrentHashMap<>();
 
   private long nextAllowedNanos;
 
@@ -214,7 +219,11 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     if (!"recording".equals(entity) && !"release-group".equals(entity)) {
       throw new IllegalArgumentException("Unsupported MusicBrainz entity");
     }
-    JsonNode body = requestUrl(baseUrl + "/ws/2/" + entity + "/" + id + "?fmt=json", true);
+    JsonNode body =
+        requestUrl(
+            baseUrl + "/ws/2/" + entity + "/" + id + "?fmt=json",
+            true,
+            response -> validUuid(value(response, "id")));
     if (body == null) {
       return null;
     }
@@ -254,7 +263,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
 
   public TrackDetail getTrackDetail(String id) {
     JsonNode recording =
-        requestUrl(baseUrl + "/ws/2/recording/" + id + "?fmt=json&inc=artist-credits", true);
+        requestUrl(
+            baseUrl + "/ws/2/recording/" + id + "?fmt=json&inc=artist-credits",
+            true,
+            response -> validUuid(value(response, "id")) && value(response, "title") != null);
     if (recording == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
     String recordingId = value(recording, "id");
     String title = value(recording, "title");
@@ -263,15 +275,17 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     List<JsonNode> releases = new ArrayList<>();
     int offset = 0;
     while (true) {
+      int pageOffset = offset;
       JsonNode page =
           requestUrl(
               baseUrl
                   + "/ws/2/release?recording="
                   + recordingId
                   + "&fmt=json&inc=artist-credits+release-groups&limit=100&offset="
-                  + offset,
+                  + pageOffset,
               false,
-              false);
+              false,
+              response -> validReleasePage(response, pageOffset, true));
       JsonNode entries = page.path("releases");
       int count = page.path("release-count").asInt(-1);
       if (!entries.isArray() || count < 0) throw invalidData("recording_release_page");
@@ -302,7 +316,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
 
   public AlbumDetail getAlbumDetail(String id) {
     JsonNode group =
-        requestUrl(baseUrl + "/ws/2/release-group/" + id + "?fmt=json&inc=artist-credits", true);
+        requestUrl(
+            baseUrl + "/ws/2/release-group/" + id + "?fmt=json&inc=artist-credits",
+            true,
+            response -> validUuid(value(response, "id")) && value(response, "title") != null);
     if (group == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
     String groupId = value(group, "id");
     String title = value(group, "title");
@@ -310,15 +327,17 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     List<JsonNode> releases = new ArrayList<>();
     int offset = 0;
     while (true) {
+      int pageOffset = offset;
       JsonNode page =
           requestUrl(
               baseUrl
                   + "/ws/2/release?release-group="
                   + groupId
                   + "&fmt=json&inc=artist-credits&limit=100&offset="
-                  + offset,
+                  + pageOffset,
               false,
-              false);
+              false,
+              response -> validReleasePage(response, pageOffset, false));
       JsonNode entries = page.path("releases");
       int count = page.path("release-count").asInt(-1);
       if (!entries.isArray() || count < 0) throw invalidData("album_release_page");
@@ -352,7 +371,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
                   + "/ws/2/release/"
                   + releaseId
                   + "?fmt=json&inc=recordings+artist-credits+media",
-              true);
+              true,
+              this::validReleaseDetail);
       if (release == null || !release.path("media").isArray())
         throw invalidData(release == null ? "album_release_not_found" : "album_release_media");
       int discIndex = 0;
@@ -405,10 +425,19 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
   }
 
   private JsonNode requestUrl(String url, boolean lookup) {
-    return requestUrl(url, lookup, !lookup);
+    return requestUrl(url, lookup, !lookup, JsonNode::isObject);
+  }
+
+  private JsonNode requestUrl(String url, boolean lookup, Predicate<JsonNode> validator) {
+    return requestUrl(url, lookup, !lookup, validator);
   }
 
   private JsonNode requestUrl(String url, boolean lookup, boolean search) {
+    return requestUrl(url, lookup, search, JsonNode::isObject);
+  }
+
+  private JsonNode requestUrl(
+      String url, boolean lookup, boolean search, Predicate<JsonNode> validator) {
 
     CachedResponse cached = cache.get(url);
 
@@ -458,8 +487,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
 
         long requestStart = System.nanoTime();
         try {
-          HttpResponse<String> response =
-              client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+          HttpResponse<String> response = sendWithTimeout(request, timeoutNanos);
           requests++;
 
           int status = response.statusCode();
@@ -566,11 +594,16 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
             }
           }
 
-          if (cache.size() >= 500) {
-            cache.clear();
+          if (!validator.test(body)) {
+            throw invalidData(operation + "_response");
           }
 
-          cache.put(url, new CachedResponse(body, System.nanoTime() + CACHE_NANOS));
+          if (cache.size() >= 500) {
+            cache.clear();
+            browseCacheExpirations.clear();
+          }
+
+          cache.put(url, new CachedResponse(body, cacheExpiration(url, operation)));
 
           if (attempt > 1) {
             log.info(
@@ -599,7 +632,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         } catch (BusinessException exception) {
           throw exception;
 
-        } catch (HttpTimeoutException exception) {
+        } catch (TimeoutException exception) {
           log.warn(
               "MusicBrainz failure reason=request_timeout operation={} attempt={} outcome=final lock_wait_ms={} request_elapsed_ms={} exception_type={}",
               operation,
@@ -623,6 +656,70 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         requestLock.unlock();
       }
     }
+  }
+
+  private HttpResponse<String> sendWithTimeout(HttpRequest request, long timeoutNanos)
+      throws InterruptedException, ExecutionException, TimeoutException {
+    CompletableFuture<HttpResponse<String>> response =
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    try {
+      return response.get(timeoutNanos, TimeUnit.NANOSECONDS);
+    } catch (TimeoutException exception) {
+      response.cancel(true);
+      throw exception;
+    } catch (ExecutionException exception) {
+      if (exception.getCause() instanceof java.net.http.HttpTimeoutException cause) {
+        response.cancel(true);
+        TimeoutException timeout = new TimeoutException("MusicBrainz response timed out");
+        timeout.initCause(cause);
+        throw timeout;
+      }
+      throw exception;
+    }
+  }
+
+  private long cacheExpiration(String url, String operation) {
+    long now = System.nanoTime();
+    if (!"browse".equals(operation)) return now + CACHE_NANOS;
+    String groupKey = browseCacheGroupKey(url);
+    boolean firstPage = url.endsWith("offset=0");
+    return browseCacheExpirations.compute(
+        groupKey,
+        (key, expiration) -> {
+          if (firstPage || expiration == null || now - expiration >= 0) {
+            cache.keySet().removeIf(cachedUrl -> browseCacheGroupKey(cachedUrl).equals(groupKey));
+            return now + CACHE_NANOS;
+          }
+          return expiration;
+        });
+  }
+
+  private String browseCacheGroupKey(String url) {
+    return url.replaceAll("([?&])offset=[^&]*", "$1offset=*");
+  }
+
+  private boolean validReleasePage(JsonNode response, int offset, boolean requireReleaseGroup) {
+    JsonNode count = response.path("release-count");
+    JsonNode releases = response.path("releases");
+    if (!releases.isArray()
+        || !count.isIntegralNumber()
+        || count.asLong(-1) < offset
+        || (releases.isEmpty() && count.asLong() > offset)
+        || count.asLong() < offset + releases.size()) return false;
+    for (JsonNode release : releases) {
+      if (!validUuid(value(release, "id"))) return false;
+      if (requireReleaseGroup && !validUuid(value(release.path("release-group"), "id")))
+        return false;
+    }
+    return true;
+  }
+
+  private boolean validReleaseDetail(JsonNode response) {
+    if (!validUuid(value(response, "id")) || !response.path("media").isArray()) return false;
+    for (JsonNode medium : response.path("media")) {
+      if (!medium.path("tracks").isArray()) return false;
+    }
+    return true;
   }
 
   private BusinessException invalidRedirect(String operation, int status) {

@@ -128,9 +128,7 @@ class MusicBrainzDiagnosticsTest {
       assertTrue(
           logs.stream()
               .anyMatch(
-                  s ->
-                      s.contains("reason=invalid_data")
-                          && s.contains("stage=release_group_metadata")));
+                  s -> s.contains("reason=invalid_data") && s.contains("stage=lookup_response")));
       assertTrue(
           logs.stream()
               .noneMatch(
