@@ -11,6 +11,10 @@ final class RepresentativeReleaseSelector {
   private RepresentativeReleaseSelector() {}
 
   static SelectedRelease select(JsonNode recording) {
+    return select(recording, recording.path("releases"));
+  }
+
+  static SelectedRelease select(JsonNode recording, Iterable<JsonNode> releases) {
 
     String recordingArtistId = firstArtistId(recording.path("artist-credit"));
 
@@ -18,7 +22,7 @@ final class RepresentativeReleaseSelector {
     int bestScore = Integer.MIN_VALUE;
     String bestDate = null;
 
-    for (JsonNode release : recording.path("releases")) {
+    for (JsonNode release : releases) {
 
       JsonNode group = release.path("release-group");
       String groupId = value(group, "id");

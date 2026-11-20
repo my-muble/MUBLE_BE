@@ -217,6 +217,64 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String releaseType,
       List<AlbumTrack> tracks) {}
 
+  public record TrackDetail(
+      String recordingId,
+      String title,
+      String artistName,
+      String artistId,
+      Long durationMs,
+      String albumTitle,
+      String releaseGroupId) {}
+
+  public TrackDetail getTrackDetail(String id) {
+    JsonNode recording =
+        requestUrl(baseUrl + "/ws/2/recording/" + id + "?fmt=json&inc=artist-credits", true);
+    if (recording == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
+    String recordingId = value(recording, "id");
+    String title = value(recording, "title");
+    if (!validUuid(recordingId) || title == null)
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+
+    List<JsonNode> releases = new ArrayList<>();
+    int offset = 0;
+    while (true) {
+      JsonNode page =
+          requestUrl(
+              baseUrl
+                  + "/ws/2/release?recording="
+                  + recordingId
+                  + "&fmt=json&inc=artist-credits+release-groups&limit=100&offset="
+                  + offset,
+              false,
+              false);
+      JsonNode entries = page.path("releases");
+      int count = page.path("release-count").asInt(-1);
+      if (!entries.isArray() || count < 0)
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      int size = 0;
+      for (JsonNode release : entries) {
+        if (validUuid(value(release, "id"))
+            && validUuid(value(release.path("release-group"), "id"))) releases.add(release);
+        size++;
+      }
+      offset += size;
+      if (offset >= count) break;
+      if (size == 0) throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    }
+    releases.sort(Comparator.comparing(release -> value(release, "id")));
+    var selected = RepresentativeReleaseSelector.select(recording, releases);
+    JsonNode length = recording.path("length");
+    Long duration = length.isIntegralNumber() ? length.asLong() : null;
+    return new TrackDetail(
+        recordingId,
+        title,
+        artistCredit(recording),
+        firstArtistId(recording),
+        duration,
+        selected == null ? null : selected.albumTitle(),
+        selected == null ? null : selected.releaseGroupId());
+  }
+
   public AlbumDetail getAlbumDetail(String id) {
     JsonNode group =
         requestUrl(baseUrl + "/ws/2/release-group/" + id + "?fmt=json&inc=artist-credits", true);
