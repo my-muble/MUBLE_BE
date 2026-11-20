@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.search.provider;
 
+import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse.AlbumTrack;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Album;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.Artist;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.ExternalReference;
@@ -15,7 +16,9 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -205,7 +208,123 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     return true;
   }
 
+  public record AlbumDetail(
+      String releaseGroupId,
+      String title,
+      String artistName,
+      String artistId,
+      String releaseDate,
+      String releaseType,
+      List<AlbumTrack> tracks) {}
+
+  public AlbumDetail getAlbumDetail(String id) {
+    JsonNode group =
+        requestUrl(baseUrl + "/ws/2/release-group/" + id + "?fmt=json&inc=artist-credits", true);
+    if (group == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
+    String groupId = value(group, "id");
+    String title = value(group, "title");
+    if (title == null || !validUuid(groupId))
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    List<JsonNode> releases = new ArrayList<>();
+    int offset = 0;
+    while (true) {
+      JsonNode page =
+          requestUrl(
+              baseUrl
+                  + "/ws/2/release?release-group="
+                  + groupId
+                  + "&fmt=json&inc=artist-credits&limit=100&offset="
+                  + offset,
+              false,
+              false);
+      JsonNode entries = page.path("releases");
+      int count = page.path("release-count").asInt(-1);
+      if (!entries.isArray() || count < 0)
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      int size = 0;
+      for (JsonNode release : entries) {
+        releases.add(release);
+        size++;
+      }
+      offset += size;
+      if (offset >= count) break;
+      if (size == 0) throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    }
+    Comparator<JsonNode> order =
+        Comparator.comparingInt(
+                (JsonNode release) -> "Official".equalsIgnoreCase(value(release, "status")) ? 0 : 1)
+            .thenComparing(
+                release -> value(release, "date"), Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(release -> value(release, "id"));
+    JsonNode selected =
+        releases.stream()
+            .filter(release -> validUuid(value(release, "id")))
+            .min(order)
+            .orElse(null);
+    if (!releases.isEmpty() && selected == null)
+      throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    List<AlbumTrack> tracks = new ArrayList<>();
+    if (selected != null) {
+      String releaseId = value(selected, "id");
+      JsonNode release =
+          requestUrl(
+              baseUrl
+                  + "/ws/2/release/"
+                  + releaseId
+                  + "?fmt=json&inc=recordings+artist-credits+media",
+              true);
+      if (release == null || !release.path("media").isArray())
+        throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+      int discIndex = 0;
+      for (JsonNode medium : release.path("media")) {
+        int discNumber = medium.path("position").asInt(++discIndex);
+        if (!medium.path("tracks").isArray())
+          throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+        for (JsonNode track : medium.path("tracks")) {
+          JsonNode recording = track.path("recording");
+          String trackTitle = value(track, "title");
+          if (trackTitle == null) trackTitle = value(recording, "title");
+          String trackArtist = artistCredit(track);
+          if (trackArtist == null) trackArtist = artistCredit(recording);
+          if (trackArtist == null) trackArtist = artistCredit(release);
+          if (trackArtist == null) trackArtist = artistCredit(group);
+          JsonNode length = track.path("length");
+          if (!length.isIntegralNumber()) length = recording.path("length");
+          Long duration = length.isIntegralNumber() ? length.asLong() : null;
+          tracks.add(
+              new AlbumTrack(
+                  discNumber,
+                  value(track, "number"),
+                  trackTitle,
+                  trackArtist,
+                  duration,
+                  value(recording, "id")));
+        }
+      }
+    }
+    return new AlbumDetail(
+        groupId,
+        title,
+        artistCredit(group),
+        firstArtistId(group),
+        value(group, "first-release-date"),
+        value(group, "primary-type"),
+        List.copyOf(tracks));
+  }
+
+  private boolean validUuid(String value) {
+    try {
+      return value != null && java.util.UUID.fromString(value).toString().equals(value);
+    } catch (IllegalArgumentException exception) {
+      return false;
+    }
+  }
+
   private JsonNode requestUrl(String url, boolean lookup) {
+    return requestUrl(url, lookup, !lookup);
+  }
+
+  private JsonNode requestUrl(String url, boolean lookup, boolean search) {
 
     CachedResponse cached = cache.get(url);
 
@@ -253,7 +372,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
           return null;
         }
 
-        if (!lookup && response.statusCode() == 400) {
+        if (search && response.statusCode() == 400) {
           throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
 

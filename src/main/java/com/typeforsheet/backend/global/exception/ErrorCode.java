@@ -39,6 +39,10 @@ public enum ErrorCode {
 
   MUSIC_EXTERNAL_ID_NOT_FOUND(HttpStatus.NOT_FOUND, "외부 음악을 찾을 수 없습니다."),
 
+  ALBUM_NOT_FOUND(HttpStatus.NOT_FOUND, "앨범을 찾을 수 없습니다."),
+
+  MUSIC_MAPPING_MISSING(HttpStatus.INTERNAL_SERVER_ERROR, "음악 외부 ID 매핑이 없습니다."),
+
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
 
   private final HttpStatus status;
