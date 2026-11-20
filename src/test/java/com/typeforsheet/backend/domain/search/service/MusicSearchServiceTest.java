@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -213,16 +212,42 @@ class MusicSearchServiceTest {
   }
 
   @Test
-  void searchAllPropagatesExternalApiFailure() {
-    SearchPage<Track> tracks = new SearchPage<>(List.of(), 0, 10, 0);
+  void searchAllKeepsSuccessfulResultsWhenOneTypeFails() {
 
-    when(catalogProvider.searchTracks("아이유", 10, 0)).thenReturn(tracks);
+    SearchPage<Album> albumPage = new SearchPage<>(List.of(), 0, 10, 0);
+
+    SearchPage<Artist> artistPage = new SearchPage<>(List.of(), 0, 10, 0);
+
+    when(catalogProvider.searchTracks("아이유", 10, 0))
+        .thenThrow(new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE));
+
+    when(catalogProvider.searchAlbums("아이유", 10, 0)).thenReturn(albumPage);
+
+    when(catalogProvider.searchArtists("아이유", 10, 0)).thenReturn(artistPage);
+
+    UnifiedMusicSearchResponse result = service.searchAll("아이유", 10, 0);
+
+    assertNull(result.tracks());
+    assertEquals("MUSIC_CATALOG_UNAVAILABLE", result.errors().get("tracks"));
+
+    assertEquals(albumPage, result.albums());
+    assertEquals(artistPage, result.artists());
+
+    assertEquals(1, result.errors().size());
+  }
+
+  @Test
+  void searchAllFailsWhenAllTypesFail() {
+
+    when(catalogProvider.searchTracks("아이유", 10, 0))
+        .thenThrow(new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE));
 
     when(catalogProvider.searchAlbums("아이유", 10, 0))
         .thenThrow(new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE));
 
-    assertThrows(BusinessException.class, () -> service.searchAll("아이유", 10, 0));
+    when(catalogProvider.searchArtists("아이유", 10, 0))
+        .thenThrow(new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE));
 
-    verify(catalogProvider, never()).searchArtists("아이유", 10, 0);
+    assertThrows(BusinessException.class, () -> service.searchAll("아이유", 10, 0));
   }
 }
