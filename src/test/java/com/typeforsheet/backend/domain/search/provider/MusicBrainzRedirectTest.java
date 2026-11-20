@@ -41,7 +41,7 @@ class MusicBrainzRedirectTest {
             });
     try {
       var provider = provider(server);
-      assertTrue(provider.exists("recording", OLD));
+      assertEquals(CURRENT, provider.resolveCanonicalId("recording", OLD));
       assertTrue(provider.exists("recording", OLD));
       assertEquals(2, calls.get());
       assertTrue(times.get(1) - times.get(0) >= TimeUnit.MILLISECONDS.toNanos(900));

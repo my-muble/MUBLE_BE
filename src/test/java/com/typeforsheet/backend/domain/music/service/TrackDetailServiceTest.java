@@ -25,7 +25,7 @@ class TrackDetailServiceTest {
     when(catalog.getTrackDetail(ID))
         .thenReturn(
             new MusicBrainzCatalogProvider.TrackDetail(
-                ID, "Track", "Artist", "artist", 1234L, "Album", GROUP));
+                ID, "Track", "Artist", "artist", 1234L, "Album", GROUP, "2017-04-21"));
     when(artwork.findCoverUrl(GROUP)).thenThrow(new IllegalStateException());
     var result = service.getTrack(1L);
     assertEquals(1L, result.trackId());
@@ -34,6 +34,7 @@ class TrackDetailServiceTest {
     assertEquals("Track", result.title());
     assertEquals(1234L, result.durationMs());
     assertEquals(GROUP, result.releaseGroupId());
+    assertEquals("2017-04-21", result.releaseDate());
     assertNull(result.coverImageUrl());
     verify(items, never()).save(any());
     verify(ids, never()).save(any());
@@ -44,11 +45,13 @@ class TrackDetailServiceTest {
     setupTrack();
     when(catalog.getTrackDetail(ID))
         .thenReturn(
-            new MusicBrainzCatalogProvider.TrackDetail(ID, "Track", null, null, null, null, null));
+            new MusicBrainzCatalogProvider.TrackDetail(
+                ID, "Track", null, null, null, null, null, null));
     var result = service.getTrack(1L);
     assertNull(result.albumTitle());
     assertNull(result.releaseGroupId());
     assertNull(result.coverImageUrl());
+    assertNull(result.releaseDate());
     verifyNoInteractions(artwork);
   }
 

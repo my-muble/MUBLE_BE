@@ -71,11 +71,13 @@ class MusicBrainzTrackDetailTest {
       assertEquals(1234L, track.durationMs());
       assertEquals("Original", track.albumTitle());
       assertEquals(GROUP2, track.releaseGroupId());
+      assertEquals("2000", track.releaseDate());
       provider.getTrackDetail(REC);
       assertEquals(3, requests.get());
       var noAlbum = provider.getTrackDetail(NO_ALBUM);
       assertNull(noAlbum.albumTitle());
       assertNull(noAlbum.releaseGroupId());
+      assertNull(noAlbum.releaseDate());
     } finally {
       server.stop(0);
     }

@@ -35,4 +35,9 @@ public record TrackDetailResponse(
             nullable = true)
         String releaseGroupId,
     @Schema(description = "커버 URL. 앨범이 없거나 비활성·없음·조회 실패 시 null", nullable = true)
-        String coverImageUrl) {}
+        String coverImageUrl,
+    @Schema(
+            description = "대표 Release 발매일. 연도 또는 연월만 제공될 수 있음",
+            example = "2017-04-21",
+            nullable = true)
+        String releaseDate) {}

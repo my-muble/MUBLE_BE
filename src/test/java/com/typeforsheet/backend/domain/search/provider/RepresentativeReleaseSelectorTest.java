@@ -68,6 +68,22 @@ class RepresentativeReleaseSelectorTest {
 
     assertEquals("Palette", result.albumTitle());
     assertEquals("palette-id", result.releaseGroupId());
+    assertEquals("2017-04-21", result.releaseDate());
+  }
+
+  @Test
+  void returnsNullDateWhenSelectedReleaseHasNoDate() {
+    JsonNode recording =
+        mapper.readTree(
+            """
+        {"releases":[
+          {"title":"Official Album","status":"Official","release-group":{"id":"group-1","primary-type":"Album"}},
+          {"title":"Bootleg","status":"Bootleg","date":"1990","release-group":{"id":"group-2","primary-type":"Album"}}
+        ]}
+        """);
+    var selected = RepresentativeReleaseSelector.select(recording);
+    assertEquals("Official Album", selected.albumTitle());
+    assertNull(selected.releaseDate());
   }
 
   @Test

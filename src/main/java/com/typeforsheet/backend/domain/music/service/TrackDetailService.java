@@ -50,6 +50,7 @@ public class TrackDetailService {
         track.durationMs(),
         track.albumTitle(),
         track.releaseGroupId(),
-        cover);
+        cover,
+        track.releaseDate());
   }
 }

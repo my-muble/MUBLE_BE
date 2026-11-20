@@ -37,14 +37,16 @@ class TrackControllerTest {
                 1234L,
                 null,
                 null,
-                null));
+                null,
+                "2017-04-21"));
     String auth = "Bearer " + tokens.createAccessToken(1L);
     mvc.perform(get("/api/tracks/1").header("Authorization", auth))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.trackId").value(1))
         .andExpect(jsonPath("$.data.reference.id").value("mbid"))
-        .andExpect(jsonPath("$.data.durationMs").value(1234));
+        .andExpect(jsonPath("$.data.durationMs").value(1234))
+        .andExpect(jsonPath("$.data.releaseDate").value("2017-04-21"));
     mvc.perform(get("/api/tracks/not-a-number").header("Authorization", auth))
         .andExpect(status().isBadRequest());
   }

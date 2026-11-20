@@ -33,8 +33,8 @@ class MusicResolveServiceTest {
   }
 
   @Test
-  void createsThenReusesMappingWithoutAnotherLookup() {
-    when(catalog.exists("release-group", ID)).thenReturn(true);
+  void createsThenReusesMappingWithoutSecondExternalLookup() {
+    when(catalog.resolveCanonicalId("release-group", ID)).thenReturn(ID);
     var first = service.resolve(new ResolveMusicRequest("MUSICBRAINZ", "RELEASE_GROUP", ID));
     var second =
         service.resolve(
@@ -42,12 +42,12 @@ class MusicResolveServiceTest {
     assertEquals(first, second);
     assertEquals(MusicType.ALBUM, first.type());
     assertEquals(1, mappings.count());
-    verify(catalog, times(1)).exists("release-group", ID);
+    verify(catalog, times(1)).resolveCanonicalId("release-group", ID);
   }
 
   @Test
   void createsTrackMapping() {
-    when(catalog.exists("recording", ID)).thenReturn(true);
+    when(catalog.resolveCanonicalId("recording", ID)).thenReturn(ID);
     assertEquals(
         MusicType.TRACK,
         service.resolve(new ResolveMusicRequest("MUSICBRAINZ", "RECORDING", ID)).type());
@@ -63,8 +63,8 @@ class MusicResolveServiceTest {
     assertError(
         ErrorCode.UNSUPPORTED_MUSIC_REFERENCE,
         new ResolveMusicRequest("MUSICBRAINZ", "ARTIST", ID));
-    when(catalog.exists("recording", ID))
-        .thenReturn(false)
+    when(catalog.resolveCanonicalId("recording", ID))
+        .thenReturn(null)
         .thenThrow(new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE));
     assertError(
         ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND,
@@ -78,7 +78,7 @@ class MusicResolveServiceTest {
 
   @Test
   void concurrentResolveCreatesOneMapping() throws Exception {
-    when(catalog.exists("recording", ID)).thenReturn(true);
+    when(catalog.resolveCanonicalId("recording", ID)).thenReturn(ID);
     int count = 8;
     ExecutorService executor = Executors.newFixedThreadPool(count);
     CountDownLatch start = new CountDownLatch(1);

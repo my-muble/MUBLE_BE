@@ -41,14 +41,14 @@ public class MusicResolveService {
             .findByProviderAndExternalIdTypeAndExternalId(MusicProvider.MUSICBRAINZ, idType, id)
             .map(mapping -> mapping.getMusicItem().getId())
             .orElse(null);
-    if (existing != null) {
-      return new ResolveMusicResponse(existing, idType.getMusicType());
-    }
-    if (!catalog.exists(entity, id)) {
+    if (existing != null) return new ResolveMusicResponse(existing, idType.getMusicType());
+    String canonicalId = catalog.resolveCanonicalId(entity, id);
+    if (canonicalId == null) {
       throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
     }
     Long musicId =
-        musicIdService.getOrCreate(idType.getMusicType(), MusicProvider.MUSICBRAINZ, idType, id);
+        musicIdService.getOrCreateWithAlias(
+            idType.getMusicType(), MusicProvider.MUSICBRAINZ, idType, id, canonicalId);
     return new ResolveMusicResponse(musicId, idType.getMusicType());
   }
 

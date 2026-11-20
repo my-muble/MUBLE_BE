@@ -19,6 +19,8 @@ final class MusicApiExamples {
       "{\"success\":false,\"code\":\"ALBUM_NOT_FOUND\",\"message\":\"앨범을 찾을 수 없습니다.\",\"data\":null}";
   static final String TRACK_NOT_FOUND =
       "{\"success\":false,\"code\":\"TRACK_NOT_FOUND\",\"message\":\"곡을 찾을 수 없습니다.\",\"data\":null}";
+  static final String MAPPING_CONFLICT =
+      "{\"success\":false,\"code\":\"MUSIC_MAPPING_CONFLICT\",\"message\":\"동일한 음악의 내부 ID 매핑이 충돌합니다.\",\"data\":null}";
   static final String MAPPING =
       "{\"success\":false,\"code\":\"MUSIC_MAPPING_MISSING\",\"message\":\"음악 외부 ID 매핑이 없습니다.\",\"data\":null}";
   static final String INTERNAL =
@@ -30,5 +32,5 @@ final class MusicApiExamples {
   static final String ALBUM_OK =
       "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"앨범 상세 조회에 성공했습니다.\",\"data\":{\"albumId\":123,\"reference\":{\"provider\":\"MUSICBRAINZ\",\"idType\":\"RELEASE_GROUP\",\"id\":\"a1234567-1234-1234-1234-123456789abc\"},\"title\":\"Palette\",\"artistName\":\"IU\",\"artistId\":\"b1234567-1234-1234-1234-123456789abc\",\"releaseDate\":\"2017-04-21\",\"releaseType\":\"Album\",\"coverImageUrl\":null,\"tracks\":[{\"discNumber\":1,\"trackNumber\":\"1\",\"title\":\"Palette\",\"artistName\":\"IU\",\"durationMs\":217000,\"recordingId\":\"c1234567-1234-1234-1234-123456789abc\"}]}}";
   static final String TRACK_OK =
-      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"곡 상세 조회에 성공했습니다.\",\"data\":{\"trackId\":456,\"reference\":{\"provider\":\"MUSICBRAINZ\",\"idType\":\"RECORDING\",\"id\":\"c1234567-1234-1234-1234-123456789abc\"},\"title\":\"밤편지\",\"artistName\":\"IU\",\"artistId\":\"b1234567-1234-1234-1234-123456789abc\",\"durationMs\":253000,\"albumTitle\":\"Palette\",\"releaseGroupId\":\"a1234567-1234-1234-1234-123456789abc\",\"coverImageUrl\":null}}";
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"곡 상세 조회에 성공했습니다.\",\"data\":{\"trackId\":456,\"reference\":{\"provider\":\"MUSICBRAINZ\",\"idType\":\"RECORDING\",\"id\":\"c1234567-1234-1234-1234-123456789abc\"},\"title\":\"밤편지\",\"artistName\":\"IU\",\"artistId\":\"b1234567-1234-1234-1234-123456789abc\",\"durationMs\":253000,\"albumTitle\":\"Palette\",\"releaseGroupId\":\"a1234567-1234-1234-1234-123456789abc\",\"coverImageUrl\":null,\"releaseDate\":\"2017-04-21\"}}";
 }

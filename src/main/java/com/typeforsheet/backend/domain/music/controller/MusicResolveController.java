@@ -33,7 +33,8 @@ public class MusicResolveController {
       description =
           """
           검색 결과 reference(provider, idType, id)를 전달합니다. RELEASE_GROUP은 ALBUM, RECORDING은 TRACK으로 연결합니다.
-          기존 매핑은 외부 조회 없이 반환하고 신규 매핑은 MusicBrainz에서 존재를 확인한 뒤 생성합니다.
+          요청 MBID의 기존 매핑이 있으면 외부 조회 없이 반환합니다. 신규 MBID는 MusicBrainz에서 정규 MBID를 확인합니다.
+          신규 연결 과정에서 서로 다른 내부 ID의 충돌이 확인되면 자동 병합하지 않고 409를 반환합니다.
           UUID가 잘못되거나 지원하지 않는 provider·idType은 거부합니다. 유효한 Access Token이 필요합니다.
           """)
   @ApiResponses({
@@ -71,6 +72,13 @@ public class MusicResolveController {
             @Content(
                 mediaType = "application/json",
                 examples = @ExampleObject(value = MusicApiExamples.EXTERNAL_NOT_FOUND))),
+    @ApiResponse(
+        responseCode = "409",
+        description = "정규 MBID와 이전 MBID의 내부 ID가 충돌함",
+        content =
+            @Content(
+                mediaType = "application/json",
+                examples = @ExampleObject(value = MusicApiExamples.MAPPING_CONFLICT))),
     @ApiResponse(
         responseCode = "500",
         description = "예상하지 못한 서버 오류",

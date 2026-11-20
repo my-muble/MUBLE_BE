@@ -207,12 +207,16 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
   }
 
   public boolean exists(String entity, String id) {
+    return resolveCanonicalId(entity, id) != null;
+  }
+
+  public String resolveCanonicalId(String entity, String id) {
     if (!"recording".equals(entity) && !"release-group".equals(entity)) {
       throw new IllegalArgumentException("Unsupported MusicBrainz entity");
     }
     JsonNode body = requestUrl(baseUrl + "/ws/2/" + entity + "/" + id + "?fmt=json", true);
     if (body == null) {
-      return false;
+      return null;
     }
     String returnedId = value(body, "id");
     try {
@@ -226,7 +230,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
           exception.getClass().getSimpleName());
       throw new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE, exception);
     }
-    return true;
+    return returnedId;
   }
 
   public record AlbumDetail(
@@ -245,7 +249,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String artistId,
       Long durationMs,
       String albumTitle,
-      String releaseGroupId) {}
+      String releaseGroupId,
+      String releaseDate) {}
 
   public TrackDetail getTrackDetail(String id) {
     JsonNode recording =
@@ -291,7 +296,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         firstArtistId(recording),
         duration,
         selected == null ? null : selected.albumTitle(),
-        selected == null ? null : selected.releaseGroupId());
+        selected == null ? null : selected.releaseGroupId(),
+        selected == null ? null : selected.releaseDate());
   }
 
   public AlbumDetail getAlbumDetail(String id) {

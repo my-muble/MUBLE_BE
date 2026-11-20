@@ -41,7 +41,7 @@ final class RepresentativeReleaseSelector {
               || (currentScore == bestScore && isEarlier(currentDate, bestDate));
 
       if (better) {
-        best = new SelectedRelease(value(release, "title"), groupId);
+        best = new SelectedRelease(value(release, "title"), groupId, currentDate);
 
         bestScore = currentScore;
         bestDate = currentDate;
@@ -145,5 +145,5 @@ final class RepresentativeReleaseSelector {
     return text.isBlank() ? null : text;
   }
 
-  record SelectedRelease(String albumTitle, String releaseGroupId) {}
+  record SelectedRelease(String albumTitle, String releaseGroupId, String releaseDate) {}
 }

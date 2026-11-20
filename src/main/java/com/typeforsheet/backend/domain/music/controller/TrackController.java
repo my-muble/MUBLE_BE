@@ -33,6 +33,7 @@ public class TrackController {
           trackId는 MusicBrainz MBID가 아닌 MUBLE 내부 TRACK ID입니다. 연결된 Recording MBID로 MusicBrainz를 조회합니다.
           대표 앨범은 공식 발매, 아티스트 일치, 컴필레이션·라이브·리믹스 등이 아닌 유형과 Album/EP/Single에 점수를 부여하고,
           동점이면 이른 발매일과 Release MBID 순으로 선택합니다. 앨범이 없으면 albumTitle, releaseGroupId, coverImageUrl은 null입니다.
+          releaseDate는 albumTitle과 동일한 대표 Release의 발매일이며 정보가 없으면 null입니다.
           커버가 없거나 조회에 실패해도 null이며 durationMs는 밀리초입니다. 다른 내부 음악 ID를 생성하지 않습니다. Access Token이 필요합니다.
           """)
   @ApiResponses({
