@@ -49,6 +49,8 @@ public enum ErrorCode {
 
   MUSIC_ITEM_NOT_FOUND(HttpStatus.NOT_FOUND, "음악을 찾을 수 없습니다."),
 
+  RECORD_NOT_FOUND(HttpStatus.NOT_FOUND, "기록을 찾을 수 없습니다."),
+
   IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "이미 다른 요청에 사용된 멱등성 키입니다."),
 
   RECORD_ALREADY_DELETED(HttpStatus.CONFLICT, "이미 삭제된 기록입니다."),

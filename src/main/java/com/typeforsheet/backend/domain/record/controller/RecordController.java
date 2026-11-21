@@ -2,7 +2,11 @@ package com.typeforsheet.backend.domain.record.controller;
 
 import com.typeforsheet.backend.domain.record.dto.CreateRecordRequest;
 import com.typeforsheet.backend.domain.record.dto.CreateRecordResponse;
+import com.typeforsheet.backend.domain.record.dto.RecordDetailResponse;
 import com.typeforsheet.backend.domain.record.service.RecordCreateService;
+import com.typeforsheet.backend.domain.record.service.RecordDetailService;
+import com.typeforsheet.backend.global.exception.BusinessException;
+import com.typeforsheet.backend.global.exception.ErrorCode;
 import com.typeforsheet.backend.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,6 +25,44 @@ import org.springframework.web.bind.annotation.*;
 @SecurityRequirement(name = "bearerAuth")
 public class RecordController {
   private final RecordCreateService service;
+  private final RecordDetailService detailService;
+
+  @GetMapping("/{recordId}")
+  @Operation(
+      summary = "음악 기록 상세 조회",
+      description =
+          """
+      유효한 Access Token이 필요합니다. 공개 기록은 로그인한 사용자에게 공개되며 비공개 기록은 작성자만 조회할 수 있습니다.
+      외부 음악 조회 장애 시 음악 ID와 타입 및 기록은 유지하고 제목, 아티스트, 커버는 null로 반환합니다.
+      """)
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "기록 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "잘못된 기록 ID"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "인증 실패"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "기록 없음 또는 비공개 기록"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "500",
+        description = "DB 또는 서버 오류")
+  })
+  public ApiResponse<RecordDetailResponse> getDetail(
+      @AuthenticationPrincipal Jwt jwt, @PathVariable String recordId) {
+    Long id;
+    try {
+      id = Long.valueOf(recordId);
+    } catch (NumberFormatException exception) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
+    }
+    return ApiResponse.success(
+        "음악 기록 조회에 성공했습니다.", detailService.getDetail(Long.valueOf(jwt.getSubject()), id));
+  }
 
   @PostMapping
   @Operation(
