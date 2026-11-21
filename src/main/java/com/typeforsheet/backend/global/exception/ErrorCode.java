@@ -47,6 +47,16 @@ public enum ErrorCode {
 
   MUSIC_MAPPING_CONFLICT(HttpStatus.CONFLICT, "동일한 음악의 내부 ID 매핑이 충돌합니다."),
 
+  MUSIC_ITEM_NOT_FOUND(HttpStatus.NOT_FOUND, "음악을 찾을 수 없습니다."),
+
+  RECORD_NOT_FOUND(HttpStatus.NOT_FOUND, "기록을 찾을 수 없습니다."),
+
+  IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "이미 다른 요청에 사용된 멱등성 키입니다."),
+
+  RECORD_ALREADY_DELETED(HttpStatus.CONFLICT, "이미 삭제된 기록입니다."),
+
+  RECORD_REQUEST_RETRY(HttpStatus.SERVICE_UNAVAILABLE, "요청을 다시 시도해 주세요."),
+
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
 
   private final HttpStatus status;
