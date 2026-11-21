@@ -3,6 +3,7 @@ package com.typeforsheet.backend.domain.record.controller;
 import com.typeforsheet.backend.domain.record.dto.CreateRecordRequest;
 import com.typeforsheet.backend.domain.record.dto.CreateRecordResponse;
 import com.typeforsheet.backend.domain.record.dto.RecordDetailResponse;
+import com.typeforsheet.backend.domain.record.dto.RecordErrorResponse;
 import com.typeforsheet.backend.domain.record.dto.UpdateRecordRequest;
 import com.typeforsheet.backend.domain.record.service.RecordCreateService;
 import com.typeforsheet.backend.domain.record.service.RecordDetailService;
@@ -12,6 +13,8 @@ import com.typeforsheet.backend.global.exception.ErrorCode;
 import com.typeforsheet.backend.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -45,16 +48,32 @@ public class RecordController {
         description = "기록 수정 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "잘못된 수정 요청"),
+        description = "잘못된 수정 요청",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "인증 실패"),
+        description = "인증 실패",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "403",
-        description = "타인의 공개 기록"),
+        description = "타인의 공개 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
-        description = "기록 없음 또는 타인의 비공개 기록")
+        description = "기록 없음 또는 타인의 비공개 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class)))
   })
   public ApiResponse<CreateRecordResponse> update(
       @AuthenticationPrincipal Jwt jwt,
@@ -73,16 +92,32 @@ public class RecordController {
         description = "기록 삭제 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "잘못된 기록 ID"),
+        description = "잘못된 기록 ID",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "인증 실패"),
+        description = "인증 실패",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "403",
-        description = "타인의 공개 기록"),
+        description = "타인의 공개 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
-        description = "기록 없음 또는 타인의 비공개 기록")
+        description = "기록 없음 또는 타인의 비공개 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class)))
   })
   public ApiResponse<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable String recordId) {
     mutationService.delete(Long.valueOf(jwt.getSubject()), parseId(recordId));
@@ -103,16 +138,32 @@ public class RecordController {
         description = "기록 조회 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "잘못된 기록 ID"),
+        description = "잘못된 기록 ID",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "인증 실패"),
+        description = "인증 실패",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
-        description = "기록 없음 또는 비공개 기록"),
+        description = "기록 없음 또는 비공개 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "500",
-        description = "DB 또는 서버 오류")
+        description = "DB 또는 서버 오류",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class)))
   })
   public ApiResponse<RecordDetailResponse> getDetail(
       @AuthenticationPrincipal Jwt jwt, @PathVariable String recordId) {
@@ -137,19 +188,39 @@ public class RecordController {
         description = "작성 또는 동일 요청 재시도 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "잘못된 키 또는 요청"),
+        description = "잘못된 키 또는 요청",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "인증 실패"),
+        description = "인증 실패",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
-        description = "사용자 또는 음악이 없음"),
+        description = "사용자 또는 음악이 없음",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
-        description = "키 재사용 충돌 또는 삭제된 기록"),
+        description = "키 재사용 충돌 또는 삭제된 기록",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "503",
-        description = "잠금 시간 초과. 재시도 가능")
+        description = "잠금 시간 초과. 재시도 가능",
+        content =
+            @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = RecordErrorResponse.class)))
   })
   public ApiResponse<CreateRecordResponse> create(
       @AuthenticationPrincipal Jwt jwt,

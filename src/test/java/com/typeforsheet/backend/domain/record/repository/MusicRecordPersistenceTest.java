@@ -10,9 +10,11 @@ import com.typeforsheet.backend.domain.record.entity.RecordCreateRequest;
 import com.typeforsheet.backend.domain.user.entity.User;
 import com.typeforsheet.backend.domain.user.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,14 +94,19 @@ class MusicRecordPersistenceTest {
     MusicItem music = musicItems.save(new MusicItem(MusicType.TRACK));
     String sql =
         "INSERT INTO music_records (user_id, music_item_id, rating_half_steps, content, is_private, created_at, updated_at) VALUES (?, ?, ?, ?, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () -> jdbc.update(sql, user.getId(), music.getId(), 0, null));
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () -> jdbc.update(sql, user.getId(), music.getId(), 11, null));
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () -> jdbc.update(sql, user.getId(), music.getId(), null, null));
+    assertCheckConstraint(sql, user.getId(), music.getId(), 0, "chk_music_records_rating");
+    assertCheckConstraint(sql, user.getId(), music.getId(), 11, "chk_music_records_rating");
+    assertCheckConstraint(sql, user.getId(), music.getId(), null, "chk_music_records_content");
+  }
+
+  private void assertCheckConstraint(
+      String sql, Long userId, Long musicId, Integer rating, String constraint) {
+    DataAccessException exception =
+        assertThrows(
+            DataAccessException.class, () -> jdbc.update(sql, userId, musicId, rating, null));
+    assertInstanceOf(SQLException.class, exception.getMostSpecificCause());
+    SQLException cause = (SQLException) exception.getMostSpecificCause();
+    assertTrue(cause.getErrorCode() == 3819 || "23513".equals(cause.getSQLState()));
+    assertTrue(cause.getMessage().toLowerCase(java.util.Locale.ROOT).contains(constraint));
   }
 }

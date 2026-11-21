@@ -199,7 +199,8 @@ class RecordCreateControllerTest {
             .getResponse()
             .getContentAsString();
     jdbc.update(
-        "UPDATE record_create_requests SET expires_at = DATEADD('DAY', -1, CURRENT_TIMESTAMP) WHERE user_id = ?",
+        "UPDATE record_create_requests SET expires_at = ? WHERE user_id = ?",
+        java.time.LocalDateTime.now().minusDays(1),
         user.getId());
     String next =
         create("expired", input)
