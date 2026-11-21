@@ -2,9 +2,13 @@ package com.typeforsheet.backend.domain.music.service;
 
 import com.typeforsheet.backend.domain.music.entity.*;
 import com.typeforsheet.backend.domain.music.repository.*;
+import com.typeforsheet.backend.global.exception.BusinessException;
+import com.typeforsheet.backend.global.exception.ErrorCode;
 import java.util.Locale;
 import java.util.UUID;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -61,6 +65,67 @@ public class MusicIdService {
       if (existing == null) throw conflict;
       return existing;
     }
+  }
+
+  public Long getOrCreateWithAlias(
+      MusicType type,
+      MusicProvider provider,
+      ExternalIdType idType,
+      String externalId,
+      String canonicalId) {
+    if (type == null
+        || provider == null
+        || idType == null
+        || idType.getProvider() != provider
+        || idType.getMusicType() != type
+        || externalId == null
+        || canonicalId == null) {
+      throw new IllegalArgumentException("Invalid music external ID mapping");
+    }
+    String alias = normalize(provider, externalId);
+    String canonical = normalize(provider, canonicalId);
+    DataAccessException lastConflict = null;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        return transaction.execute(
+            status -> {
+              MusicExternalId canonicalMapping =
+                  externalIds
+                      .findByProviderAndExternalIdTypeAndExternalId(provider, idType, canonical)
+                      .orElse(null);
+              MusicExternalId aliasMapping =
+                  alias.equals(canonical)
+                      ? canonicalMapping
+                      : externalIds
+                          .findByProviderAndExternalIdTypeAndExternalId(provider, idType, alias)
+                          .orElse(null);
+              if (canonicalMapping != null
+                  && aliasMapping != null
+                  && !canonicalMapping
+                      .getMusicItem()
+                      .getId()
+                      .equals(aliasMapping.getMusicItem().getId())) {
+                throw new BusinessException(ErrorCode.MUSIC_MAPPING_CONFLICT);
+              }
+              MusicItem item =
+                  canonicalMapping != null
+                      ? canonicalMapping.getMusicItem()
+                      : aliasMapping != null
+                          ? aliasMapping.getMusicItem()
+                          : musicItems.save(new MusicItem(type));
+              if (canonicalMapping == null) {
+                externalIds.saveAndFlush(new MusicExternalId(item, provider, idType, canonical));
+              }
+              if (!alias.equals(canonical) && aliasMapping == null) {
+                externalIds.saveAndFlush(new MusicExternalId(item, provider, idType, alias));
+              }
+              return item.getId();
+            });
+      } catch (DataIntegrityViolationException | PessimisticLockingFailureException conflict) {
+        lastConflict = conflict;
+      }
+    }
+    throw lastConflict;
   }
 
   private String normalize(MusicProvider provider, String externalId) {

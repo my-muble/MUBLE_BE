@@ -7,4 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface MusicExternalIdRepository extends JpaRepository<MusicExternalId, Long> {
   Optional<MusicExternalId> findByProviderAndExternalIdTypeAndExternalId(
       MusicProvider provider, ExternalIdType externalIdType, String externalId);
+
+  Optional<MusicExternalId> findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+      Long musicItemId, MusicProvider provider, ExternalIdType externalIdType);
 }

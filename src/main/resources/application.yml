@@ -36,5 +36,5 @@ app:
       user-agent: "${MUSICBRAINZ_USER_AGENT:MUBLE/0.1 (https://github.com/TypeForSheet/TypeForSheet_BE)}"
 
     artwork:
-      enabled: ${MUSIC_ARTWORK_ENABLED:false}
+      enabled: ${MUSIC_ARTWORK_ENABLED:true}
       caa-base-url: https://coverartarchive.org

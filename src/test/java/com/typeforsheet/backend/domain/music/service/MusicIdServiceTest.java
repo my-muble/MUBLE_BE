@@ -1,15 +1,22 @@
 package com.typeforsheet.backend.domain.music.service;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 import com.typeforsheet.backend.domain.music.entity.*;
 import com.typeforsheet.backend.domain.music.repository.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 @SpringBootTest
 class MusicIdServiceTest {
@@ -109,5 +116,40 @@ class MusicIdServiceTest {
     } finally {
       executor.shutdownNow();
     }
+  }
+
+  @Test
+  void retriesDatabaseDeadlockDuringAliasCreation() {
+    PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    TransactionStatus status = mock(TransactionStatus.class);
+    when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
+    MusicItemRepository itemRepository = mock(MusicItemRepository.class);
+    MusicExternalIdRepository externalIdRepository = mock(MusicExternalIdRepository.class);
+    MusicItem item = mock(MusicItem.class);
+    when(item.getId()).thenReturn(42L);
+    when(item.getType()).thenReturn(MusicType.ALBUM);
+    when(itemRepository.save(any(MusicItem.class))).thenReturn(item);
+    when(externalIdRepository.findByProviderAndExternalIdTypeAndExternalId(any(), any(), any()))
+        .thenReturn(Optional.empty());
+    AtomicInteger writes = new AtomicInteger();
+    doAnswer(
+            invocation -> {
+              if (writes.incrementAndGet() == 1) throw new CannotAcquireLockException("deadlock");
+              return invocation.getArgument(0);
+            })
+        .when(externalIdRepository)
+        .saveAndFlush(any(MusicExternalId.class));
+
+    MusicIdService retryingService =
+        new MusicIdService(itemRepository, externalIdRepository, transactionManager);
+    assertEquals(
+        42L,
+        retryingService.getOrCreateWithAlias(
+            MusicType.ALBUM,
+            MusicProvider.MUSICBRAINZ,
+            ExternalIdType.RELEASE_GROUP,
+            "a1234567-1234-1234-1234-123456789abc",
+            "b1234567-1234-1234-1234-123456789abc"));
+    assertEquals(3, writes.get());
   }
 }
