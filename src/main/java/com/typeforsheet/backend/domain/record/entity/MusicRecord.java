@@ -52,4 +52,15 @@ public class MusicRecord {
     this.createdAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     this.updatedAt = createdAt;
   }
+
+  public void update(Byte ratingHalfSteps, String content, boolean isPrivate) {
+    if (Objects.equals(this.ratingHalfSteps, ratingHalfSteps)
+        && Objects.equals(this.content, content)
+        && this.isPrivate == isPrivate) return;
+    this.ratingHalfSteps = ratingHalfSteps;
+    this.content = content;
+    this.isPrivate = isPrivate;
+    LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
+    this.updatedAt = now.isAfter(updatedAt) ? now : updatedAt.plusNanos(1_000);
+  }
 }

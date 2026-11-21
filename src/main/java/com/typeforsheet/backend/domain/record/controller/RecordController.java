@@ -3,8 +3,10 @@ package com.typeforsheet.backend.domain.record.controller;
 import com.typeforsheet.backend.domain.record.dto.CreateRecordRequest;
 import com.typeforsheet.backend.domain.record.dto.CreateRecordResponse;
 import com.typeforsheet.backend.domain.record.dto.RecordDetailResponse;
+import com.typeforsheet.backend.domain.record.dto.UpdateRecordRequest;
 import com.typeforsheet.backend.domain.record.service.RecordCreateService;
 import com.typeforsheet.backend.domain.record.service.RecordDetailService;
+import com.typeforsheet.backend.domain.record.service.RecordMutationService;
 import com.typeforsheet.backend.global.exception.BusinessException;
 import com.typeforsheet.backend.global.exception.ErrorCode;
 import com.typeforsheet.backend.global.response.ApiResponse;
@@ -26,6 +28,66 @@ import org.springframework.web.bind.annotation.*;
 public class RecordController {
   private final RecordCreateService service;
   private final RecordDetailService detailService;
+  private final RecordMutationService mutationService;
+
+  @PatchMapping("/{recordId}")
+  @Operation(
+      summary = "음악 기록 수정",
+      description =
+          """
+      작성자만 별점, 본문, 공개 범위를 수정할 수 있습니다. 필드 생략은 기존 값을 유지합니다.
+      별점과 본문에 null을 전달하면 값을 제거하고, isPrivate에 null을 전달하면 거부합니다.
+      최종적으로 별점 또는 본문 중 하나가 필요하며 음악과 작성자는 변경할 수 없습니다.
+      """)
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "기록 수정 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "잘못된 수정 요청"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "인증 실패"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "타인의 공개 기록"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "기록 없음 또는 타인의 비공개 기록")
+  })
+  public ApiResponse<CreateRecordResponse> update(
+      @AuthenticationPrincipal Jwt jwt,
+      @PathVariable String recordId,
+      @RequestBody UpdateRecordRequest request) {
+    return ApiResponse.success(
+        "음악 기록 수정에 성공했습니다.",
+        mutationService.update(Long.valueOf(jwt.getSubject()), parseId(recordId), request));
+  }
+
+  @DeleteMapping("/{recordId}")
+  @Operation(summary = "음악 기록 삭제", description = "작성자만 삭제할 수 있습니다. 삭제된 기록을 다시 삭제하면 404입니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "기록 삭제 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "잘못된 기록 ID"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "인증 실패"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "타인의 공개 기록"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "기록 없음 또는 타인의 비공개 기록")
+  })
+  public ApiResponse<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable String recordId) {
+    mutationService.delete(Long.valueOf(jwt.getSubject()), parseId(recordId));
+    return ApiResponse.success("음악 기록 삭제에 성공했습니다.");
+  }
 
   @GetMapping("/{recordId}")
   @Operation(
@@ -54,14 +116,9 @@ public class RecordController {
   })
   public ApiResponse<RecordDetailResponse> getDetail(
       @AuthenticationPrincipal Jwt jwt, @PathVariable String recordId) {
-    Long id;
-    try {
-      id = Long.valueOf(recordId);
-    } catch (NumberFormatException exception) {
-      throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
-    }
     return ApiResponse.success(
-        "음악 기록 조회에 성공했습니다.", detailService.getDetail(Long.valueOf(jwt.getSubject()), id));
+        "음악 기록 조회에 성공했습니다.",
+        detailService.getDetail(Long.valueOf(jwt.getSubject()), parseId(recordId)));
   }
 
   @PostMapping
@@ -102,5 +159,13 @@ public class RecordController {
       @RequestBody CreateRecordRequest request) {
     return ApiResponse.success(
         "음악 기록 작성에 성공했습니다.", service.create(Long.valueOf(jwt.getSubject()), key, request));
+  }
+
+  private Long parseId(String recordId) {
+    try {
+      return Long.valueOf(recordId);
+    } catch (NumberFormatException exception) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
+    }
   }
 }

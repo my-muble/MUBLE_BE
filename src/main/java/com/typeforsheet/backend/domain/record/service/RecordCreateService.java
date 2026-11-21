@@ -12,7 +12,6 @@ import com.typeforsheet.backend.domain.user.entity.User;
 import com.typeforsheet.backend.domain.user.repository.UserRepository;
 import com.typeforsheet.backend.global.exception.BusinessException;
 import com.typeforsheet.backend.global.exception.ErrorCode;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -133,25 +132,9 @@ public class RecordCreateService {
         || request.musicId() == null
         || request.musicId() <= 0
         || request.isPrivate() == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
-    Byte halfSteps = null;
-    if (request.rating() != null) {
-      try {
-        int value = request.rating().multiply(BigDecimal.valueOf(2)).intValueExact();
-        if (value < 1 || value > 10) throw new ArithmeticException();
-        halfSteps = (byte) value;
-      } catch (ArithmeticException invalid) {
-        throw new BusinessException(ErrorCode.INVALID_REQUEST, invalid);
-      }
-    }
-    String content = request.content();
-    if (content != null
-        && content
-            .codePoints()
-            .allMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c))) content = null;
-    if (content != null && content.codePointCount(0, content.length()) > 500)
-      throw new BusinessException(ErrorCode.INVALID_REQUEST);
-    if (halfSteps == null && content == null)
-      throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    Byte halfSteps = RecordValidation.rating(request.rating());
+    String content = RecordValidation.content(request.content());
+    RecordValidation.requireContent(halfSteps, content);
     return new NormalizedRequest(request.musicId(), halfSteps, content, request.isPrivate());
   }
 
