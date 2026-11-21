@@ -4,6 +4,7 @@ import com.typeforsheet.backend.domain.music.entity.MusicItem;
 import com.typeforsheet.backend.domain.user.entity.User;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -48,7 +49,7 @@ public class MusicRecord {
     this.ratingHalfSteps = ratingHalfSteps;
     this.content = content;
     this.isPrivate = isPrivate;
-    this.createdAt = LocalDateTime.now();
+    this.createdAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     this.updatedAt = createdAt;
   }
 }
