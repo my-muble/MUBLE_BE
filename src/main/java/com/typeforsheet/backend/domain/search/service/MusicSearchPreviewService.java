@@ -37,15 +37,15 @@ public class MusicSearchPreviewService {
     // 기존 통합 검색 및 부분 실패 처리 재사용
     UnifiedMusicSearchResponse result = musicSearchService.searchAll(keyword, CANDIDATE_LIMIT, 0);
 
-    // 정확히 일치하는 유형을 기준으로 표시 순서 결정
-    List<String> displayOrder = determineDisplayOrder(keyword, result);
-
     // 유형별 중복 제거 및 최대 3개 반환
     SearchPage<Track> tracks = toPreview(result.tracks(), track -> track.reference().id());
 
     SearchPage<Album> albums = toPreview(result.albums(), album -> album.reference().id());
 
     SearchPage<Artist> artists = toPreview(result.artists(), artist -> artist.reference().id());
+
+    // 실제 반환되는 검색 결과를 기준으로 표시 순서 결정
+    List<String> displayOrder = determineDisplayOrder(keyword, tracks, albums, artists);
 
     return new MusicSearchPreviewResponse(tracks, albums, artists, displayOrder, result.errors());
   }
@@ -81,35 +81,32 @@ public class MusicSearchPreviewService {
   }
 
   // 유형별 표시 순서 결정
-  private List<String> determineDisplayOrder(String query, UnifiedMusicSearchResponse result) {
+  private List<String> determineDisplayOrder(
+      String query,
+      SearchPage<Track> tracks,
+      SearchPage<Album> albums,
+      SearchPage<Artist> artists) {
 
     List<String> exactMatches = new ArrayList<>();
 
-    if (hasExactMatch(result.tracks(), Track::title, query)) {
+    if (hasExactMatch(tracks, Track::title, query)) {
       exactMatches.add(TRACKS);
     }
 
-    if (hasExactMatch(result.albums(), Album::title, query)) {
+    if (hasExactMatch(albums, Album::title, query)) {
       exactMatches.add(ALBUMS);
     }
 
-    if (hasExactMatch(result.artists(), Artist::name, query)) {
+    if (hasExactMatch(artists, Artist::name, query)) {
       exactMatches.add(ARTISTS);
     }
 
-    // 정확히 일치하는 유형이 없거나 여러 유형이면 기본 순서
-    if (exactMatches.size() != 1) {
-      return DEFAULT_ORDER;
-    }
+    // 정확히 일치하는 유형을 먼저 배치하고, 각 그룹 내 기본 순서 유지
+    List<String> order = new ArrayList<>(exactMatches);
 
-    // 정확히 일치하는 유형이 하나라면 해당 유형 우선
-    String firstType = exactMatches.getFirst();
-
-    List<String> order = new ArrayList<>();
-    order.add(firstType);
-
+    // 정확히 일치하지 않는 유형은 기본 순서대로 뒤에 배치
     for (String type : DEFAULT_ORDER) {
-      if (!type.equals(firstType)) {
+      if (!exactMatches.contains(type)) {
         order.add(type);
       }
     }
