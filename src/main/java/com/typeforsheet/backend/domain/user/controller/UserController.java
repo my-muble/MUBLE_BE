@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -66,10 +65,10 @@ public class UserController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "200",
             description = "기록 통계 조회 성공",
+            useReturnTypeSchema = true,
             content =
                 @Content(
                     mediaType = "application/json",
-                    schema = @Schema(implementation = ApiResponse.class),
                     examples = {
                       @ExampleObject(
                           name = "전체 기간 통계",
@@ -93,7 +92,7 @@ public class UserController {
                                       {"rating": 2.0, "count": 0},
                                       {"rating": 2.5, "count": 0},
                                       {"rating": 3.0, "count": 0},
-                                      {"rating": 3.5, "count": 1},
+                                      {"rating": 3.5, "count": 0},
                                       {"rating": 4.0, "count": 1},
                                       {"rating": 4.5, "count": 0},
                                       {"rating": 5.0, "count": 0}
