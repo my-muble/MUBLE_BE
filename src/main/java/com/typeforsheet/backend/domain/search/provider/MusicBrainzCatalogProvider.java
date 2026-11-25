@@ -33,6 +33,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,7 +127,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     }
 
     return new SearchPage<>(
-        new ArrayList<>(results.values()), root.path("count").asInt(0), limit, offset);
+        prioritizeMatches(new ArrayList<>(results.values()), Track::title, query),
+        root.path("count").asInt(0),
+        limit,
+        offset);
   }
 
   @Override
@@ -160,7 +164,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     }
 
     return new SearchPage<>(
-        new ArrayList<>(results.values()), root.path("count").asInt(0), limit, offset);
+        prioritizeMatches(new ArrayList<>(results.values()), Album::title, query),
+        root.path("count").asInt(0),
+        limit,
+        offset);
   }
 
   @Override
@@ -192,23 +199,91 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
     }
 
     return new SearchPage<>(
-        new ArrayList<>(results.values()), root.path("count").asInt(0), limit, offset);
+        prioritizeMatches(new ArrayList<>(results.values()), Artist::name, query),
+        root.path("count").asInt(0),
+        limit,
+        offset);
   }
 
   private JsonNode request(String entity, String query, int limit, int offset) {
+
+    String searchQuery = buildSearchQuery(query);
 
     String url =
         baseUrl
             + "/ws/2/"
             + entity
             + "/?query="
-            + URLEncoder.encode(query, StandardCharsets.UTF_8)
+            + URLEncoder.encode(searchQuery, StandardCharsets.UTF_8)
             + "&fmt=json&limit="
             + limit
             + "&offset="
             + offset;
 
     return requestUrl(url, false);
+  }
+
+  // 정확 일치 구문과 단어별 접두어 검색을 하나의 MusicBrainz 쿼리로 구성
+  private String buildSearchQuery(String query) {
+
+    if (query == null || query.isBlank()) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    }
+
+    String keyword = query.strip();
+    String phrase = "\"" + escapeLucene(keyword) + "\"^5";
+    List<String> prefixes = new ArrayList<>();
+
+    for (String token : keyword.split("\\s+")) {
+      prefixes.add(escapeLucene(token) + "*");
+    }
+
+    return "(" + phrase + " OR (" + String.join(" AND ", prefixes) + "))";
+  }
+
+  // 사용자가 입력한 Lucene 연산자를 검색어의 일반 문자로 처리
+  private String escapeLucene(String text) {
+
+    StringBuilder escaped = new StringBuilder(text.length());
+
+    for (int i = 0; i < text.length(); i++) {
+      char ch = text.charAt(i);
+      if ("+-!(){}[]^\"~*?:\\/&|".indexOf(ch) >= 0) {
+        escaped.append('\\');
+      }
+      escaped.append(ch);
+    }
+
+    return escaped.toString();
+  }
+
+  // 같은 MusicBrainz 페이지 내에서 제목 정확 일치와 접두어 일치를 우선 정렬
+  private <T> List<T> prioritizeMatches(
+      List<T> items, Function<T, String> nameExtractor, String query) {
+
+    String keyword = query.strip();
+    List<T> ordered = new ArrayList<>(items);
+    ordered.sort(Comparator.comparingInt(item -> matchRank(nameExtractor.apply(item), keyword)));
+    return ordered;
+  }
+
+  private int matchRank(String name, String query) {
+
+    if (name == null) {
+      return 2;
+    }
+
+    String normalizedName = name.strip();
+
+    if (normalizedName.equalsIgnoreCase(query)) {
+      return 0;
+    }
+
+    if (normalizedName.regionMatches(true, 0, query, 0, query.length())) {
+      return 1;
+    }
+
+    return 2;
   }
 
   public boolean exists(String entity, String id) {
