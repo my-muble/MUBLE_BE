@@ -15,10 +15,13 @@ import com.typeforsheet.backend.domain.search.provider.MusicBrainzCatalogProvide
 import com.typeforsheet.backend.global.exception.BusinessException;
 import com.typeforsheet.backend.global.exception.ErrorCode;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +32,8 @@ import org.springframework.stereotype.Service;
 public class HomeRankingService {
 
   private static final int MAX_RANKINGS = 10;
+  private static final int MAX_CACHED_TRACKS = 1024;
+  private static final Duration REPRESENTATIVE_ALBUM_TTL = Duration.ofMinutes(10);
 
   private final HomeRankingRepository rankings;
   private final MusicExternalIdRepository externalIds;
@@ -36,6 +41,7 @@ public class HomeRankingService {
   private final MusicResolveService musicResolver;
   private final AlbumDetailService albums;
   private final Clock clock;
+  private final Map<Long, CachedRepresentativeAlbum> representativeAlbums = new LinkedHashMap<>();
 
   public List<HomeRankingResponse> getRankings() {
 
@@ -114,11 +120,7 @@ public class HomeRankingService {
             .map(MusicExternalId::getExternalId)
             .orElseThrow(() -> new BusinessException(ErrorCode.MUSIC_MAPPING_MISSING));
 
-    // 기존 대표 앨범 선택 로직을 재사용한다.
-    // TrackDetailService와 달리 커버 조회는 하지 않는다.
-    var track = catalog.getTrackDetail(recordingId);
-
-    String releaseGroupId = track.releaseGroupId();
+    String releaseGroupId = findRepresentativeAlbum(trackId, recordingId);
 
     if (releaseGroupId == null) {
       return null;
@@ -133,6 +135,33 @@ public class HomeRankingService {
                 .resolve(new ResolveMusicRequest("MUSICBRAINZ", "RELEASE_GROUP", id))
                 .musicId());
   }
+
+  private String findRepresentativeAlbum(Long trackId, String recordingId) {
+    synchronized (representativeAlbums) {
+      CachedRepresentativeAlbum cached = representativeAlbums.get(trackId);
+      if (cached != null
+          && cached.recordingId().equals(recordingId)
+          && clock.instant().isBefore(cached.expiresAt())) {
+        return cached.releaseGroupId();
+      }
+    }
+
+    // 외부 호출 중에는 캐시 잠금을 유지하지 않는다.
+    String releaseGroupId = catalog.getTrackDetail(recordingId).releaseGroupId();
+    synchronized (representativeAlbums) {
+      representativeAlbums.put(
+          trackId,
+          new CachedRepresentativeAlbum(
+              recordingId, releaseGroupId, clock.instant().plus(REPRESENTATIVE_ALBUM_TTL)));
+      if (representativeAlbums.size() > MAX_CACHED_TRACKS) {
+        representativeAlbums.remove(representativeAlbums.keySet().iterator().next());
+      }
+    }
+    return releaseGroupId;
+  }
+
+  private record CachedRepresentativeAlbum(
+      String recordingId, String releaseGroupId, Instant expiresAt) {}
 
   private record AlbumRank(Long albumId, long score, LocalDateTime latestCreatedAt) {}
 

@@ -278,6 +278,36 @@ class HomeRankingControllerTest {
   }
 
   @Test
+  void reusesRepresentativeAlbumUntilCacheExpires() throws Exception {
+    User viewer = user("ranking-representative-cache");
+    MusicItem album = music(MusicType.ALBUM);
+    MusicItem track = music(MusicType.TRACK);
+
+    attachRecording(track, RECORDING_ID);
+    representative(RECORDING_ID, RELEASE_GROUP_ID);
+    resolveToAlbum(RELEASE_GROUP_ID, album);
+    albumDetails(album);
+    save(viewer, track, (byte) 8, null, false, NOW.minusMinutes(2));
+
+    mvc.perform(authorized(viewer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].rankingScore").value(2));
+
+    save(viewer, track, null, "another record", false, NOW.minusMinutes(1));
+    mvc.perform(authorized(viewer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].rankingScore").value(3));
+    verify(catalog, times(1)).getTrackDetail(RECORDING_ID);
+
+    var expiration = NOW.plusMinutes(10).atZone(clock.getZone()).toInstant();
+    when(clock.instant()).thenReturn(expiration);
+    mvc.perform(authorized(viewer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].rankingScore").value(3));
+    verify(catalog, times(2)).getTrackDetail(RECORDING_ID);
+  }
+
+  @Test
   void propagatesMusicBrainzFailuresInsteadOfReturningWrongRankings() throws Exception {
     User viewer = user("ranking-upstream-failure");
     MusicItem track = music(MusicType.TRACK);
