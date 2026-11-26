@@ -9,12 +9,8 @@ import org.springframework.context.annotation.Configuration;
 public class OpenApiConfig {
 
   @Bean
-  public OpenAPI typeForSheetOpenApi() {
+  public OpenAPI mubleOpenApi() {
     return new OpenAPI()
-        .info(
-            new Info()
-                .title("TypeForSheet API")
-                .description("TypeForSheet Backend REST API")
-                .version("v1"));
+        .info(new Info().title("MUBLE API").description("MUBLE Backend REST API").version("v1"));
   }
 }

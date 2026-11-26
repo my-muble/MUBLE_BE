@@ -49,7 +49,7 @@ public class AuthController {
 
                     - 신규 회원은 자동 가입됩니다.
                     - 기존 회원은 동일 계정으로 로그인합니다.
-                    - TFS Access Token과 Refresh Token을 반환합니다.
+                    - MUBLE Access Token과 Refresh Token을 반환합니다.
                     """)
   @PostMapping("/login/google")
   public ResponseEntity<ApiResponse<SocialLoginResponse>> googleLogin(
@@ -67,9 +67,9 @@ public class AuthController {
                     Kakao Access Token을 검증하여 로그인합니다.
 
                     - 유효한 Kakao Access Token이 필요합니다.
-                    - TFS에 등록된 카카오 앱의 토큰인지 확인합니다.
+                    - MUBLE에 등록된 카카오 앱의 토큰인지 확인합니다.
                     - 신규 회원은 자동 가입됩니다.
-                    - 로그인 성공 시 TFS 토큰을 발급합니다.
+                    - 로그인 성공 시 MUBLE 토큰을 발급합니다.
                     """)
   @PostMapping("/login/kakao")
   public ResponseEntity<ApiResponse<SocialLoginResponse>> kakaoLogin(
@@ -110,7 +110,7 @@ public class AuthController {
                     - 대상 앱 식별자와 만료 시간을 검증합니다.
                     - 서버에서 발급한 일회용 nonce를 검증합니다.
                     - 신규 회원은 자동 가입됩니다.
-                    - TFS Access Token과 Refresh Token을 반환합니다.
+                    - MUBLE Access Token과 Refresh Token을 반환합니다.
                     """)
   @PostMapping("/login/apple")
   public ResponseEntity<ApiResponse<SocialLoginResponse>> appleLogin(
@@ -148,7 +148,7 @@ public class AuthController {
           """
                     로그인한 사용자의 Refresh Token을 폐기합니다.
 
-                    - 유효한 TFS Access Token이 필요합니다.
+                    - 유효한 MUBLE Access Token이 필요합니다.
                     - 요청 본문에 Refresh Token을 전달합니다.
                     - 해당 사용자 소유의 토큰만 폐기할 수 있습니다.
                     - 기존 Access Token은 만료 전까지 유효할 수 있습니다.
