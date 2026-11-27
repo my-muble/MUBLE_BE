@@ -6,6 +6,8 @@ import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Album
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Track;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse.AlbumSummary;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse.TrackRecord;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.AlbumCover;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.DaySummary;
@@ -29,6 +31,7 @@ import java.math.RoundingMode;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.Year;
 import java.time.YearMonth;
 import java.time.ZoneId;
@@ -135,18 +138,11 @@ public class ArchiveTimelineService {
       }
       selected = selected == null ? metadata : mergeAlbumMetadata(selected, metadata);
       if (row.musicType() == MusicType.ALBUM) {
-        BigDecimal rating =
-            row.ratingHalfSteps() == null
-                ? null
-                : BigDecimal.valueOf(row.ratingHalfSteps() * 5L, 1);
         albumRecords.add(
             new AlbumRecord(
                 row.recordId(),
-                row.createdAt()
-                    .atZone(ZoneId.systemDefault())
-                    .withZoneSameInstant(KOREA_ZONE)
-                    .toOffsetDateTime(),
-                rating,
+                koreaTime(row.createdAt()),
+                rating(row.ratingHalfSteps()),
                 row.content()));
       } else {
         trackCount++;
@@ -204,6 +200,54 @@ public class ArchiveTimelineService {
     requireUser(userId);
     return archiveRepository.findDayRows(
         userId, storageStart(date), storageStart(date.plusDays(1)));
+  }
+
+  @Transactional(readOnly = true)
+  public ArchiveDayTrackResponse getDayTrack(
+      Long userId, LocalDate date, String albumKey, Long trackId) {
+    requireUser(userId);
+    List<ArchiveRecordRow> rows =
+        archiveRepository.findDayMusicRows(
+            userId, trackId, MusicType.TRACK, storageStart(date), storageStart(date.plusDays(1)));
+    if (rows.isEmpty()) {
+      throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+    }
+
+    AlbumMetadata metadata = resolveAlbumMetadata(trackId, MusicType.TRACK);
+    if (!albumKey.equals(metadata.albumKey())) {
+      throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+    }
+
+    TrackDetailResponse track = metadata.track();
+    String recordingId = track == null || track.reference() == null ? null : track.reference().id();
+    AlbumTrack albumTrack =
+        recordingId == null
+            ? null
+            : enrichTrackAlbum(metadata).tracks().stream()
+                .filter(candidate -> recordingId.equals(candidate.recordingId()))
+                .findFirst()
+                .orElse(null);
+    var trackInfo =
+        new ArchiveDayTrackResponse.Track(
+            trackId,
+            albumTrack == null ? null : albumTrack.discNumber(),
+            albumTrack == null ? null : albumTrack.trackNumber(),
+            albumTrack != null && albumTrack.title() != null
+                ? albumTrack.title()
+                : track == null ? null : track.title(),
+            track == null ? null : track.artistName(),
+            metadata.coverImageUrl());
+    List<TrackRecord> records =
+        rows.stream()
+            .map(
+                row ->
+                    new TrackRecord(
+                        row.recordId(),
+                        koreaTime(row.createdAt()),
+                        rating(row.ratingHalfSteps()),
+                        row.content()))
+            .toList();
+    return new ArchiveDayTrackResponse(date, albumKey, trackInfo, records.size(), records);
   }
 
   private void requireUser(Long userId) {
@@ -295,7 +339,18 @@ public class ArchiveTimelineService {
   }
 
   private LocalDate toKoreaDate(LocalDateTime createdAt) {
-    return createdAt.atZone(ZoneId.systemDefault()).withZoneSameInstant(KOREA_ZONE).toLocalDate();
+    return koreaTime(createdAt).toLocalDate();
+  }
+
+  private OffsetDateTime koreaTime(LocalDateTime createdAt) {
+    return createdAt
+        .atZone(ZoneId.systemDefault())
+        .withZoneSameInstant(KOREA_ZONE)
+        .toOffsetDateTime();
+  }
+
+  private BigDecimal rating(Byte halfSteps) {
+    return halfSteps == null ? null : BigDecimal.valueOf(halfSteps * 5L, 1);
   }
 
   private TimeRange timeRange(int year) {

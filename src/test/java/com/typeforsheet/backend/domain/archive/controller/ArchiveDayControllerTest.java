@@ -208,6 +208,76 @@ class ArchiveDayControllerTest {
   }
 
   @Test
+  void returnsOnlySelectedTrackRecordsForTheOwnerAndDate() throws Exception {
+    User owner = users.saveAndFlush(new User("day-track-owner"));
+    User other = users.saveAndFlush(new User("day-track-other"));
+    MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    MusicItem sibling = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    MusicItem album = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    save(owner, track, (byte) 9, null, false, START);
+    save(owner, track, null, "private comment", true, START.plusHours(11));
+    save(owner, track, (byte) 6, "previous day", false, START.minusSeconds(1));
+    save(owner, track, (byte) 8, "next day", false, START.plusDays(1));
+    save(other, track, (byte) 4, "another user", false, START.plusHours(12));
+    save(owner, sibling, (byte) 4, "another track", false, START.plusHours(12));
+    save(owner, album, (byte) 4, "album record", false, START.plusHours(12));
+
+    when(tracks.getTrack(track.getId()))
+        .thenReturn(
+            new TrackDetailResponse(
+                track.getId(),
+                new ExternalReference("MUSICBRAINZ", "RECORDING", "selected-track"),
+                "Recording title",
+                "Artist A",
+                null,
+                null,
+                "Album A",
+                "group-a",
+                "cover-a",
+                null));
+    when(catalog.getAlbumDetail("group-a"))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.AlbumDetail(
+                "group-a",
+                "Album A",
+                "Artist A",
+                null,
+                null,
+                null,
+                List.of(new AlbumTrack(1, "2", "Track title", null, null, "selected-track"))));
+
+    String path = URL + "/albums/group-a/tracks/" + track.getId();
+    mvc.perform(get(path)).andExpect(status().isUnauthorized());
+    mvc.perform(get(path).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.date").value("2026-09-25"))
+        .andExpect(jsonPath("$.data.albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.track.trackId").value(track.getId()))
+        .andExpect(jsonPath("$.data.track.discNumber").value(1))
+        .andExpect(jsonPath("$.data.track.trackNumber").value("2"))
+        .andExpect(jsonPath("$.data.track.title").value("Track title"))
+        .andExpect(jsonPath("$.data.track.artistName").value("Artist A"))
+        .andExpect(jsonPath("$.data.track.coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.recordCount").value(2))
+        .andExpect(jsonPath("$.data.records.length()").value(2))
+        .andExpect(jsonPath("$.data.records[0].createdAt").value("2026-09-25T11:00:00+09:00"))
+        .andExpect(jsonPath("$.data.records[0].content").value("private comment"))
+        .andExpect(jsonPath("$.data.records[0].rating").doesNotExist())
+        .andExpect(jsonPath("$.data.records[1].rating").value(4.5))
+        .andExpect(jsonPath("$.data.records[1].content").doesNotExist());
+    mvc.perform(get(path.replace("group-a", "wrong-album")).header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("TRACK_NOT_FOUND"));
+    mvc.perform(
+            get(path.replace("2026-09-25", "2026-09-27")).header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("TRACK_NOT_FOUND"));
+    mvc.perform(get(URL + "/albums/group-a/tracks/0").header("Authorization", bearer(owner)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+  }
+
+  @Test
   void handlesEmptyDatesInvalidDatesAndUnauthenticatedRequests() throws Exception {
     User owner = users.saveAndFlush(new User("archive-empty"));
     mvc.perform(get(URL)).andExpect(status().isUnauthorized());

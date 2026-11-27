@@ -2,6 +2,7 @@ package com.typeforsheet.backend.domain.archive.controller;
 
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse;
 import com.typeforsheet.backend.domain.archive.service.ArchiveTimelineService;
 import com.typeforsheet.backend.global.exception.BusinessException;
@@ -97,6 +98,39 @@ public class ArchiveController {
         "날짜별 앨범 기록 조회에 성공했습니다.",
         archiveTimelineService.getDayAlbum(
             Long.valueOf(jwt.getSubject()), parseDate(date), albumKey));
+  }
+
+  @GetMapping("/timeline/{date}/albums/{albumKey}/tracks/{trackId}")
+  @Operation(
+      summary = "날짜별 수록곡 기록 조회",
+      description =
+          """
+          ARC-004의 albumKey와 trackId로 선택 날짜(한국 시간)의 본인 수록곡 기록을 최신순으로 조회합니다.
+          공개·비공개 기록을 모두 포함하며, 곡이 해당 그룹에 속하지 않거나 선택 날짜의 기록이 없으면
+          404 TRACK_NOT_FOUND를 반환합니다.
+          """)
+  public ApiResponse<ArchiveDayTrackResponse> getDayTrack(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "조회할 기록 작성일(YYYY-MM-DD)", example = "2026-09-25") @PathVariable
+          String date,
+      @Parameter(description = "날짜별 앨범 기록 응답의 album.albumKey") @PathVariable String albumKey,
+      @Parameter(description = "수록곡 행의 내부 trackId", example = "456") @PathVariable String trackId) {
+    return ApiResponse.success(
+        "날짜별 수록곡 기록 조회에 성공했습니다.",
+        archiveTimelineService.getDayTrack(
+            Long.valueOf(jwt.getSubject()), parseDate(date), albumKey, parseTrackId(trackId)));
+  }
+
+  private long parseTrackId(String trackId) {
+    try {
+      long id = Long.parseLong(trackId);
+      if (id > 0) {
+        return id;
+      }
+    } catch (NumberFormatException exception) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
+    }
+    throw new BusinessException(ErrorCode.INVALID_REQUEST);
   }
 
   private LocalDate parseDate(String date) {
