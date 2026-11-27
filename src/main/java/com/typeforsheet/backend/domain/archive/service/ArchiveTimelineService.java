@@ -14,9 +14,11 @@ import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.DaySu
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.MonthGroup;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRecordRow;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRepository;
+import com.typeforsheet.backend.domain.archive.repository.ArchiveTrackAlbumRepository;
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse.AlbumTrack;
 import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
 import com.typeforsheet.backend.domain.music.entity.ExternalIdType;
+import com.typeforsheet.backend.domain.music.entity.MusicExternalId;
 import com.typeforsheet.backend.domain.music.entity.MusicProvider;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
 import com.typeforsheet.backend.domain.music.repository.MusicExternalIdRepository;
@@ -39,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,8 +62,9 @@ public class ArchiveTimelineService {
   private final TrackDetailService trackDetailService;
   private final MusicExternalIdRepository externalIds;
   private final MusicBrainzCatalogProvider catalog;
+  private final ArchiveTrackAlbumRepository trackAlbums;
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ArchiveTimelineResponse getTimeline(Long userId, int year) {
     validateYear(year);
     requireUser(userId);
@@ -98,7 +102,7 @@ public class ArchiveTimelineService {
     return new ArchiveTimelineResponse(year, archiveRepository.existsByUser_Id(userId), months);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ArchiveDayResponse getDay(Long userId, LocalDate date) {
     List<ArchiveRecordRow> rows = dayRows(userId, date);
     Map<Long, AlbumMetadata> metadataCache = new LinkedHashMap<>();
@@ -120,7 +124,7 @@ public class ArchiveTimelineService {
     return new ArchiveDayResponse(date, rows.size(), summaries.size(), summaries);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ArchiveDayAlbumResponse getDayAlbum(Long userId, LocalDate date, String albumKey) {
     List<AlbumRecord> albumRecords = new ArrayList<>();
     Map<String, TrackCounter> recordedTracks = new LinkedHashMap<>();
@@ -202,7 +206,7 @@ public class ArchiveTimelineService {
         userId, storageStart(date), storageStart(date.plusDays(1)));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public ArchiveDayTrackResponse getDayTrack(
       Long userId, LocalDate date, String albumKey, Long trackId) {
     requireUser(userId);
@@ -292,50 +296,64 @@ public class ArchiveTimelineService {
   }
 
   private AlbumMetadata resolveAlbumMetadata(Long musicItemId, MusicType musicType) {
-    try {
-      if (musicType == MusicType.ALBUM) {
+    if (musicType == MusicType.ALBUM) {
+      String releaseGroupId =
+          externalIds
+              .findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+                  musicItemId, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP)
+              .map(MusicExternalId::getExternalId)
+              .orElse(null);
+      String key = releaseGroupId == null ? fallbackKey(musicType, musicItemId) : releaseGroupId;
+      try {
         var album = albumDetailService.getAlbum(musicItemId);
-        String externalId = album.reference() == null ? null : album.reference().id();
         return new AlbumMetadata(
-            externalId == null ? fallbackKey(musicType, musicItemId) : externalId,
-            externalId,
+            key,
+            releaseGroupId,
             musicItemId,
             album.title(),
             album.artistName(),
             album.coverImageUrl(),
             album.tracks(),
             null);
-      }
-      if (musicType == MusicType.TRACK) {
-        var track = trackDetailService.getTrack(musicItemId);
+      } catch (BusinessException exception) {
+        logMetadataFailure(musicItemId, exception);
         return new AlbumMetadata(
-            track.releaseGroupId() == null
-                ? fallbackKey(musicType, musicItemId)
-                : track.releaseGroupId(),
-            track.releaseGroupId(),
-            null,
-            track.albumTitle(),
-            null,
-            track.coverImageUrl(),
-            List.of(),
-            track);
+            key, releaseGroupId, musicItemId, null, null, null, List.of(), null);
       }
-      throw new IllegalStateException("지원하지 않는 음악 유형입니다: " + musicType);
-    } catch (BusinessException exception) {
-      log.warn(
-          "Archive album metadata unavailable for music {}: {}",
-          musicItemId,
-          exception.getErrorCode());
-      return new AlbumMetadata(
-          fallbackKey(musicType, musicItemId),
-          null,
-          musicType == MusicType.ALBUM ? musicItemId : null,
-          null,
-          null,
-          null,
-          List.of(),
-          null);
     }
+    if (musicType != MusicType.TRACK) {
+      throw new IllegalStateException("지원하지 않는 음악 유형입니다: " + musicType);
+    }
+
+    var remembered = trackAlbums.find(musicItemId);
+    TrackDetailResponse track = null;
+    try {
+      track = trackDetailService.getTrack(musicItemId);
+    } catch (BusinessException exception) {
+      if (remembered.isEmpty()) {
+        throw exception;
+      }
+      logMetadataFailure(musicItemId, exception);
+    }
+    String releaseGroupId =
+        remembered.isPresent()
+            ? remembered.get().releaseGroupId()
+            : trackAlbums.remember(musicItemId, track.releaseGroupId()).releaseGroupId();
+    boolean matchingAlbum = track != null && Objects.equals(releaseGroupId, track.releaseGroupId());
+    return new AlbumMetadata(
+        releaseGroupId == null ? fallbackKey(musicType, musicItemId) : releaseGroupId,
+        releaseGroupId,
+        null,
+        matchingAlbum ? track.albumTitle() : null,
+        null,
+        matchingAlbum ? track.coverImageUrl() : null,
+        List.of(),
+        track);
+  }
+
+  private void logMetadataFailure(Long musicItemId, BusinessException exception) {
+    log.warn(
+        "Archive music metadata unavailable for {}: {}", musicItemId, exception.getErrorCode());
   }
 
   private LocalDate toKoreaDate(LocalDateTime createdAt) {

@@ -8,8 +8,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse;
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse.AlbumTrack;
 import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
+import com.typeforsheet.backend.domain.music.entity.ExternalIdType;
+import com.typeforsheet.backend.domain.music.entity.MusicExternalId;
 import com.typeforsheet.backend.domain.music.entity.MusicItem;
+import com.typeforsheet.backend.domain.music.entity.MusicProvider;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
+import com.typeforsheet.backend.domain.music.repository.MusicExternalIdRepository;
 import com.typeforsheet.backend.domain.music.repository.MusicItemRepository;
 import com.typeforsheet.backend.domain.music.service.AlbumDetailService;
 import com.typeforsheet.backend.domain.music.service.TrackDetailService;
@@ -19,6 +23,8 @@ import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.
 import com.typeforsheet.backend.domain.search.provider.MusicBrainzCatalogProvider;
 import com.typeforsheet.backend.domain.user.entity.User;
 import com.typeforsheet.backend.domain.user.repository.UserRepository;
+import com.typeforsheet.backend.global.exception.BusinessException;
+import com.typeforsheet.backend.global.exception.ErrorCode;
 import com.typeforsheet.backend.global.security.JwtTokenProvider;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -47,6 +53,7 @@ class ArchiveDayControllerTest {
   @Autowired MockMvc mvc;
   @Autowired UserRepository users;
   @Autowired MusicItemRepository items;
+  @Autowired MusicExternalIdRepository externalIds;
   @Autowired MusicRecordRepository records;
   @Autowired JwtTokenProvider tokens;
   @Autowired JdbcTemplate jdbc;
@@ -59,6 +66,7 @@ class ArchiveDayControllerTest {
     User owner = users.saveAndFlush(new User("archive-owner"));
     User other = users.saveAndFlush(new User("archive-other"));
     MusicItem album = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    mapAlbum(album, "group-a");
     MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
     MusicItem trackOnly = items.saveAndFlush(new MusicItem(MusicType.TRACK));
 
@@ -111,6 +119,7 @@ class ArchiveDayControllerTest {
     User owner = users.saveAndFlush(new User("album-owner"));
     User other = users.saveAndFlush(new User("album-other"));
     MusicItem album = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    mapAlbum(album, "group-a");
     MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
     save(owner, album, (byte) 9, null, true, START.plusHours(9));
     save(owner, album, null, "latest private record", true, START.plusHours(10));
@@ -275,6 +284,56 @@ class ArchiveDayControllerTest {
     mvc.perform(get(URL + "/albums/group-a/tracks/0").header("Authorization", bearer(owner)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+  }
+
+  @Test
+  void keepsAlbumGroupingAndNavigationWhenCatalogFailsAndRecovers() throws Exception {
+    User owner = users.saveAndFlush(new User("archive-catalog-outage"));
+    MusicItem album = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    mapAlbum(album, "stable-group");
+    save(owner, album, (byte) 8, null, false, START);
+    save(owner, track, (byte) 9, null, true, START.plusHours(1));
+    BusinessException outage = new BusinessException(ErrorCode.MUSIC_CATALOG_UNAVAILABLE);
+    when(albums.getAlbum(album.getId())).thenThrow(outage);
+    when(tracks.getTrack(track.getId())).thenThrow(outage);
+
+    mvc.perform(get(URL).header("Authorization", bearer(owner)))
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.code").value("MUSIC_CATALOG_UNAVAILABLE"));
+
+    org.mockito.Mockito.doReturn(track(track, "stable-group")).when(tracks).getTrack(track.getId());
+    mvc.perform(get(URL).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albumCount").value(1))
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("stable-group"));
+
+    when(tracks.getTrack(track.getId())).thenThrow(outage);
+    String albumPath = URL + "/albums/stable-group";
+    String trackPath = albumPath + "/tracks/" + track.getId();
+    mvc.perform(get(URL).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albumCount").value(1))
+        .andExpect(jsonPath("$.data.albums[0].recordCount").value(2))
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("stable-group"));
+    mvc.perform(get(albumPath).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.trackRecordCount").value(1));
+    mvc.perform(get(trackPath).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.recordCount").value(1));
+
+    org.mockito.Mockito.doReturn(track(track, "changed-group"))
+        .when(tracks)
+        .getTrack(track.getId());
+    mvc.perform(get(trackPath).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albumKey").value("stable-group"));
+  }
+
+  private void mapAlbum(MusicItem album, String group) {
+    externalIds.saveAndFlush(
+        new MusicExternalId(album, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP, group));
   }
 
   @Test

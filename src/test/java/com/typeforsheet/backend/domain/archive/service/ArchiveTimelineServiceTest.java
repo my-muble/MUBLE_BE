@@ -10,8 +10,13 @@ import static org.mockito.Mockito.when;
 
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRecordRow;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRepository;
+import com.typeforsheet.backend.domain.archive.repository.ArchiveTrackAlbumRepository;
+import com.typeforsheet.backend.domain.archive.repository.ArchiveTrackAlbumRepository.TrackAlbum;
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse;
 import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
+import com.typeforsheet.backend.domain.music.entity.ExternalIdType;
+import com.typeforsheet.backend.domain.music.entity.MusicExternalId;
+import com.typeforsheet.backend.domain.music.entity.MusicProvider;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
 import com.typeforsheet.backend.domain.music.repository.MusicExternalIdRepository;
 import com.typeforsheet.backend.domain.music.service.AlbumDetailService;
@@ -21,6 +26,7 @@ import com.typeforsheet.backend.domain.search.provider.MusicBrainzCatalogProvide
 import com.typeforsheet.backend.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +36,8 @@ class ArchiveTimelineServiceTest {
   private UserRepository users;
   private AlbumDetailService albums;
   private TrackDetailService tracks;
+  private MusicExternalIdRepository externalIds;
+  private ArchiveTrackAlbumRepository trackAlbums;
   private ArchiveTimelineService service;
 
   @BeforeEach
@@ -38,14 +46,17 @@ class ArchiveTimelineServiceTest {
     users = mock(UserRepository.class);
     albums = mock(AlbumDetailService.class);
     tracks = mock(TrackDetailService.class);
+    externalIds = mock(MusicExternalIdRepository.class);
+    trackAlbums = mock(ArchiveTrackAlbumRepository.class);
     service =
         new ArchiveTimelineService(
             archives,
             users,
             albums,
             tracks,
-            mock(MusicExternalIdRepository.class),
-            mock(MusicBrainzCatalogProvider.class));
+            externalIds,
+            mock(MusicBrainzCatalogProvider.class),
+            trackAlbums);
     when(users.existsById(1L)).thenReturn(true);
     when(archives.existsByUser_Id(1L)).thenReturn(true);
   }
@@ -66,7 +77,10 @@ class ArchiveTimelineServiceTest {
 
     when(albums.getAlbum(11L)).thenReturn(album(11L, "rg-1", "cover-1"));
     when(tracks.getTrack(12L)).thenReturn(track(12L, "rg-1", "cover-1"));
+    when(trackAlbums.find(12L)).thenReturn(Optional.of(new TrackAlbum("rg-1")));
+    mapAlbum(11L, "rg-1");
     for (long id = 13; id <= 17; id++) {
+      mapAlbum(id, "rg-" + (id - 11));
       when(albums.getAlbum(id)).thenReturn(album(id, "rg-" + (id - 11), "cover-" + id));
     }
 
@@ -82,6 +96,14 @@ class ArchiveTimelineServiceTest {
     assertEquals("rg-1", day.covers().getFirst().albumKey());
     verify(albums).getAlbum(11L);
     verify(tracks).getTrack(12L);
+  }
+
+  private void mapAlbum(long albumId, String releaseGroupId) {
+    MusicExternalId mapping = mock(MusicExternalId.class);
+    when(mapping.getExternalId()).thenReturn(releaseGroupId);
+    when(externalIds.findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+            albumId, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP))
+        .thenReturn(Optional.of(mapping));
   }
 
   @Test
