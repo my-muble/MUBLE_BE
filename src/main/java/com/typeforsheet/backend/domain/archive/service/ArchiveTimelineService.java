@@ -1,5 +1,9 @@
 package com.typeforsheet.backend.domain.archive.service;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Album;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.AlbumRecord;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Track;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse.AlbumSummary;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse;
@@ -8,6 +12,8 @@ import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.DaySu
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse.MonthGroup;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRecordRow;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRepository;
+import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse.AlbumTrack;
+import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
 import com.typeforsheet.backend.domain.music.entity.ExternalIdType;
 import com.typeforsheet.backend.domain.music.entity.MusicProvider;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
@@ -91,9 +97,7 @@ public class ArchiveTimelineService {
 
   @Transactional(readOnly = true)
   public ArchiveDayResponse getDay(Long userId, LocalDate date) {
-    requireUser(userId);
-    List<ArchiveRecordRow> rows =
-        archiveRepository.findDayRows(userId, storageStart(date), storageStart(date.plusDays(1)));
+    List<ArchiveRecordRow> rows = dayRows(userId, date);
     Map<Long, AlbumMetadata> metadataCache = new LinkedHashMap<>();
     Map<String, AlbumAccumulator> albums = new LinkedHashMap<>();
     for (ArchiveRecordRow row : rows) {
@@ -111,6 +115,95 @@ public class ArchiveTimelineService {
             .map(album -> album.toResponse(enrichTrackAlbum(album.metadata)))
             .toList();
     return new ArchiveDayResponse(date, rows.size(), summaries.size(), summaries);
+  }
+
+  @Transactional(readOnly = true)
+  public ArchiveDayAlbumResponse getDayAlbum(Long userId, LocalDate date, String albumKey) {
+    List<AlbumRecord> albumRecords = new ArrayList<>();
+    Map<String, TrackCounter> recordedTracks = new LinkedHashMap<>();
+    Map<Long, AlbumMetadata> metadataCache = new LinkedHashMap<>();
+    AlbumMetadata selected = null;
+    long trackCount = 0;
+
+    for (ArchiveRecordRow row : dayRows(userId, date)) {
+      AlbumMetadata metadata =
+          metadataCache.computeIfAbsent(
+              row.musicItemId(),
+              ignored -> resolveAlbumMetadata(row.musicItemId(), row.musicType()));
+      if (!albumKey.equals(metadata.albumKey())) {
+        continue;
+      }
+      selected = selected == null ? metadata : mergeAlbumMetadata(selected, metadata);
+      if (row.musicType() == MusicType.ALBUM) {
+        BigDecimal rating =
+            row.ratingHalfSteps() == null
+                ? null
+                : BigDecimal.valueOf(row.ratingHalfSteps() * 5L, 1);
+        albumRecords.add(
+            new AlbumRecord(
+                row.recordId(),
+                row.createdAt()
+                    .atZone(ZoneId.systemDefault())
+                    .withZoneSameInstant(KOREA_ZONE)
+                    .toOffsetDateTime(),
+                rating,
+                row.content()));
+      } else {
+        trackCount++;
+        TrackDetailResponse track = metadata.track();
+        String recordingId =
+            track == null || track.reference() == null ? null : track.reference().id();
+        String trackKey =
+            recordingId == null ? fallbackKey(MusicType.TRACK, row.musicItemId()) : recordingId;
+        recordedTracks.computeIfAbsent(
+                trackKey,
+                ignored ->
+                    new TrackCounter(
+                        row.musicItemId(), recordingId, track == null ? null : track.title()))
+            .count++;
+      }
+    }
+
+    if (selected == null) {
+      throw new BusinessException(ErrorCode.ALBUM_NOT_FOUND);
+    }
+    selected = enrichTrackAlbum(selected);
+    List<Track> tracks = new ArrayList<>();
+    for (AlbumTrack track : selected.tracks()) {
+      TrackCounter records = recordedTracks.remove(track.recordingId());
+      tracks.add(
+          new Track(
+              records == null ? null : records.trackId,
+              track.recordingId(),
+              track.discNumber(),
+              track.trackNumber(),
+              track.title(),
+              records == null ? 0 : records.count));
+    }
+    for (TrackCounter records : recordedTracks.values()) {
+      tracks.add(
+          new Track(
+              records.trackId, records.recordingId, null, null, records.title, records.count));
+    }
+    return new ArchiveDayAlbumResponse(
+        date,
+        new Album(
+            selected.albumKey(),
+            selected.albumId(),
+            selected.title(),
+            selected.artistName(),
+            selected.coverImageUrl()),
+        albumRecords.size() + trackCount,
+        albumRecords.size(),
+        trackCount,
+        List.copyOf(albumRecords),
+        List.copyOf(tracks));
+  }
+
+  private List<ArchiveRecordRow> dayRows(Long userId, LocalDate date) {
+    requireUser(userId);
+    return archiveRepository.findDayRows(
+        userId, storageStart(date), storageStart(date.plusDays(1)));
   }
 
   private void requireUser(Long userId) {
@@ -138,10 +231,19 @@ public class ArchiveTimelineService {
           albumId,
           album.title(),
           album.artistName(),
-          metadata.coverImageUrl());
+          metadata.coverImageUrl(),
+          album.tracks(),
+          metadata.track());
     } catch (BusinessException exception) {
       return new AlbumMetadata(
-          metadata.albumKey(), id, albumId, metadata.title(), null, metadata.coverImageUrl());
+          metadata.albumKey(),
+          id,
+          albumId,
+          metadata.title(),
+          null,
+          metadata.coverImageUrl(),
+          List.of(),
+          metadata.track());
     }
   }
 
@@ -156,7 +258,9 @@ public class ArchiveTimelineService {
             musicItemId,
             album.title(),
             album.artistName(),
-            album.coverImageUrl());
+            album.coverImageUrl(),
+            album.tracks(),
+            null);
       }
       if (musicType == MusicType.TRACK) {
         var track = trackDetailService.getTrack(musicItemId);
@@ -168,7 +272,9 @@ public class ArchiveTimelineService {
             null,
             track.albumTitle(),
             null,
-            track.coverImageUrl());
+            track.coverImageUrl(),
+            List.of(),
+            track);
       }
       throw new IllegalStateException("지원하지 않는 음악 유형입니다: " + musicType);
     } catch (BusinessException exception) {
@@ -182,6 +288,8 @@ public class ArchiveTimelineService {
           musicType == MusicType.ALBUM ? musicItemId : null,
           null,
           null,
+          null,
+          List.of(),
           null);
     }
   }
@@ -223,7 +331,38 @@ public class ArchiveTimelineService {
       Long albumId,
       String title,
       String artistName,
-      String coverImageUrl) {}
+      String coverImageUrl,
+      List<AlbumTrack> tracks,
+      TrackDetailResponse track) {}
+
+  private static AlbumMetadata mergeAlbumMetadata(AlbumMetadata current, AlbumMetadata candidate) {
+    AlbumMetadata details =
+        current.albumId() == null && candidate.albumId() != null ? candidate : current;
+    String cover =
+        current.coverImageUrl() == null ? candidate.coverImageUrl() : current.coverImageUrl();
+    return new AlbumMetadata(
+        details.albumKey(),
+        details.releaseGroupId(),
+        details.albumId(),
+        details.title(),
+        details.artistName(),
+        cover,
+        details.tracks(),
+        details.track());
+  }
+
+  private static final class TrackCounter {
+    private final Long trackId;
+    private final String recordingId;
+    private final String title;
+    private long count;
+
+    private TrackCounter(Long trackId, String recordingId, String title) {
+      this.trackId = trackId;
+      this.recordingId = recordingId;
+      this.title = title;
+    }
+  }
 
   private static final class AlbumAccumulator {
     private AlbumMetadata metadata;
@@ -245,18 +384,7 @@ public class ArchiveTimelineService {
       if (contentPreview == null && row.content() != null && !row.content().isBlank()) {
         contentPreview = row.content();
       }
-      AlbumMetadata details =
-          metadata.albumId() == null && candidate.albumId() != null ? candidate : metadata;
-      String cover =
-          metadata.coverImageUrl() == null ? candidate.coverImageUrl() : metadata.coverImageUrl();
-      metadata =
-          new AlbumMetadata(
-              details.albumKey(),
-              details.releaseGroupId(),
-              details.albumId(),
-              details.title(),
-              details.artistName(),
-              cover);
+      metadata = mergeAlbumMetadata(metadata, candidate);
     }
 
     private AlbumSummary toResponse(AlbumMetadata details) {

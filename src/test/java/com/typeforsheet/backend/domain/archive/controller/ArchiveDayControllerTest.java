@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse;
+import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse.AlbumTrack;
 import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
 import com.typeforsheet.backend.domain.music.entity.MusicItem;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
@@ -103,6 +104,107 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.albums[1].albumKey").value("group-b"))
         .andExpect(jsonPath("$.data.albums[1].artistName").value("Album Artist B"))
         .andExpect(jsonPath("$.data.albums[1].averageRating").doesNotExist());
+  }
+
+  @Test
+  void returnsAlbumRecordsAndAllTrackRowsWithDateScopedCounts() throws Exception {
+    User owner = users.saveAndFlush(new User("album-owner"));
+    User other = users.saveAndFlush(new User("album-other"));
+    MusicItem album = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    save(owner, album, (byte) 9, null, true, START.plusHours(9));
+    save(owner, album, null, "latest private record", true, START.plusHours(10));
+    save(owner, track, (byte) 8, null, false, START);
+    save(owner, track, null, "second track record", true, START.plusHours(11));
+    save(owner, track, (byte) 2, null, false, START.plusDays(1));
+    save(other, track, (byte) 2, null, false, START);
+
+    when(albums.getAlbum(album.getId()))
+        .thenReturn(
+            new AlbumDetailResponse(
+                album.getId(),
+                new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "group-a"),
+                "Album A",
+                "Artist A",
+                null,
+                null,
+                null,
+                "cover-a",
+                List.of(
+                    new AlbumTrack(1, "1", "Unrecorded", null, null, "unrecorded"),
+                    new AlbumTrack(1, "2", "Recorded", null, null, "recorded"))));
+    when(tracks.getTrack(track.getId()))
+        .thenReturn(
+            new TrackDetailResponse(
+                track.getId(),
+                new ExternalReference("MUSICBRAINZ", "RECORDING", "recorded"),
+                "Recorded",
+                null,
+                null,
+                null,
+                "Album A",
+                "group-a",
+                null,
+                null));
+
+    String path = URL + "/albums/group-a";
+    mvc.perform(get(path)).andExpect(status().isUnauthorized());
+    mvc.perform(get(path).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.date").value("2026-09-25"))
+        .andExpect(jsonPath("$.data.album.albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.album.coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.totalRecordCount").value(4))
+        .andExpect(jsonPath("$.data.albumRecordCount").value(2))
+        .andExpect(jsonPath("$.data.trackRecordCount").value(2))
+        .andExpect(jsonPath("$.data.albumRecords[0].createdAt").value("2026-09-25T10:00:00+09:00"))
+        .andExpect(jsonPath("$.data.albumRecords[0].content").value("latest private record"))
+        .andExpect(jsonPath("$.data.albumRecords[0].rating").doesNotExist())
+        .andExpect(jsonPath("$.data.albumRecords[1].rating").value(4.5))
+        .andExpect(jsonPath("$.data.tracks[0].trackNumber").value("1"))
+        .andExpect(jsonPath("$.data.tracks[0].recordCount").value(0))
+        .andExpect(jsonPath("$.data.tracks[1].trackId").value(track.getId()))
+        .andExpect(jsonPath("$.data.tracks[1].recordCount").value(2));
+    mvc.perform(get(URL + "/albums/unselected").header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ALBUM_NOT_FOUND"));
+  }
+
+  @Test
+  void opensTrackOnlyAlbumWithoutAnInternalAlbumId() throws Exception {
+    User owner = users.saveAndFlush(new User("track-only-owner"));
+    MusicItem track = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    save(owner, track, (byte) 9, null, true, START);
+    when(tracks.getTrack(track.getId()))
+        .thenReturn(
+            new TrackDetailResponse(
+                track.getId(),
+                new ExternalReference("MUSICBRAINZ", "RECORDING", "track-c"),
+                "Track C",
+                null,
+                null,
+                null,
+                "Album C",
+                "group-c",
+                "cover-c",
+                null));
+    when(catalog.getAlbumDetail("group-c"))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.AlbumDetail(
+                "group-c",
+                "Album C",
+                "Artist C",
+                null,
+                null,
+                null,
+                List.of(new AlbumTrack(1, "1", "Track C", null, null, "track-c"))));
+    mvc.perform(get(URL + "/albums/group-c").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.album.albumId").doesNotExist())
+        .andExpect(jsonPath("$.data.album.title").value("Album C"))
+        .andExpect(jsonPath("$.data.totalRecordCount").value(1))
+        .andExpect(jsonPath("$.data.albumRecords").isEmpty())
+        .andExpect(jsonPath("$.data.tracks[0].recordCount").value(1));
   }
 
   @Test

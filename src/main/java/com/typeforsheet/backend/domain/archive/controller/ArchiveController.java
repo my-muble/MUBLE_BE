@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.archive.controller;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse;
 import com.typeforsheet.backend.domain.archive.service.ArchiveTimelineService;
@@ -75,6 +76,27 @@ public class ArchiveController {
     return ApiResponse.success(
         "날짜별 아카이브 조회에 성공했습니다.",
         archiveTimelineService.getDay(Long.valueOf(jwt.getSubject()), parseDate(date)));
+  }
+
+  @GetMapping("/timeline/{date}/albums/{albumKey}")
+  @Operation(
+      summary = "날짜별 앨범 기록 조회",
+      description =
+          """
+          날짜별 아카이브 상세 목록의 albumKey로 해당 날짜의 본인 앨범·수록곡 기록을 조회합니다.
+          한국 시간 기준으로 공개·비공개 기록을 모두 집계합니다.
+          앨범 자체 기록은 최신순이며 수록곡은 기록이 0건이어도 앨범 순서대로 반환합니다.
+          해당 날짜에 선택한 앨범 그룹의 본인 기록이 없으면 404 ALBUM_NOT_FOUND입니다.
+          """)
+  public ApiResponse<ArchiveDayAlbumResponse> getDayAlbum(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "조회할 기록 작성일(YYYY-MM-DD)", example = "2026-09-25") @PathVariable
+          String date,
+      @Parameter(description = "날짜별 아카이브 응답에서 반환한 albumKey") @PathVariable String albumKey) {
+    return ApiResponse.success(
+        "날짜별 앨범 기록 조회에 성공했습니다.",
+        archiveTimelineService.getDayAlbum(
+            Long.valueOf(jwt.getSubject()), parseDate(date), albumKey));
   }
 
   private LocalDate parseDate(String date) {
