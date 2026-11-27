@@ -91,10 +91,10 @@ class MusicRecordListRepositoryTest {
 
   @Test
   void cursorOrdersByCreationTimeAndIdAndDoesNotAffectCount() {
+    MusicRecord newest = add(me, album, (byte) 1, null, false, time.plusSeconds(1));
     MusicRecord oldest = add(me, album, (byte) 1, null, false, time.minusSeconds(1));
     MusicRecord first = add(me, album, (byte) 1, null, false, time);
     MusicRecord second = add(me, album, (byte) 1, null, false, time);
-    MusicRecord newest = add(me, album, (byte) 1, null, false, time.plusSeconds(1));
     entityManager.clear();
 
     List<MusicRecord> pageAndExtra = lists.findMine(album.getId(), me.getId(), null, null, 3);
