@@ -73,7 +73,17 @@ class HomePublicRecordControllerTest {
     when(albums.getAlbum(album.getId()))
         .thenReturn(
             new AlbumDetailResponse(
-                album.getId(), null, "album", "artist", null, null, null, "cover", List.of()));
+                album.getId(),
+                null,
+                "album",
+                "artist",
+                null,
+                null,
+                null,
+                "cover",
+                List.of(),
+                null,
+                null));
     when(tracks.getTrack(track.getId()))
         .thenReturn(
             new TrackDetailResponse(

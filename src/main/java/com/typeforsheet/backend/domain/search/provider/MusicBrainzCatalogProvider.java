@@ -324,7 +324,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String artistId,
       String releaseDate,
       String releaseType,
-      List<AlbumTrack> tracks) {}
+      List<AlbumTrack> tracks,
+      boolean tracksComplete) {}
 
   public record TrackDetail(
       String recordingId,
@@ -438,6 +439,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
             .orElse(null);
     if (!releases.isEmpty() && selected == null) throw invalidData("album_release_selection");
     List<AlbumTrack> tracks = new ArrayList<>();
+    boolean tracksComplete = selected != null;
     if (selected != null) {
       String releaseId = value(selected, "id");
       JsonNode release =
@@ -450,10 +452,12 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
               this::validReleaseDetail);
       if (release == null || !release.path("media").isArray())
         throw invalidData(release == null ? "album_release_not_found" : "album_release_media");
+      tracksComplete = declaredCountMatches(release, "medium-count", release.path("media").size());
       int discIndex = 0;
       for (JsonNode medium : release.path("media")) {
         int discNumber = medium.path("position").asInt(++discIndex);
         if (!medium.path("tracks").isArray()) throw invalidData("album_release_tracks");
+        tracksComplete &= declaredCountMatches(medium, "track-count", medium.path("tracks").size());
         for (JsonNode track : medium.path("tracks")) {
           JsonNode recording = track.path("recording");
           String trackTitle = value(track, "title");
@@ -475,6 +479,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
                   value(recording, "id")));
         }
       }
+      tracksComplete &= declaredCountMatches(release, "track-count", tracks.size());
     }
     return new AlbumDetail(
         groupId,
@@ -483,7 +488,14 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         firstArtistId(group),
         value(group, "first-release-date"),
         value(group, "primary-type"),
-        List.copyOf(tracks));
+        List.copyOf(tracks),
+        tracksComplete);
+  }
+
+  private boolean declaredCountMatches(JsonNode node, String field, int actualCount) {
+    JsonNode count = node.path(field);
+    return count.isMissingNode()
+        || (count.isIntegralNumber() && count.canConvertToLong() && count.asLong() == actualCount);
   }
 
   private boolean validUuid(String value) {

@@ -49,7 +49,8 @@ class MusicDetailNavigationTest {
                 null,
                 "2020",
                 "Album",
-                List.of(new AlbumTrack(1, "1", "Track", "Artist", 1000L, TRACK))));
+                List.of(new AlbumTrack(1, "1", "Track", "Artist", 1000L, TRACK)),
+                true));
     when(catalog.resolveCanonicalId("recording", TRACK)).thenReturn(TRACK);
     when(catalog.getTrackDetail(TRACK))
         .thenReturn(

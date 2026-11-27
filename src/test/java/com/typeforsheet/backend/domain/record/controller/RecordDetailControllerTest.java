@@ -61,7 +61,17 @@ class RecordDetailControllerTest {
             invocation -> {
               assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
               return new AlbumDetailResponse(
-                  album.getId(), null, "album", "artist", null, null, null, "cover", List.of());
+                  album.getId(),
+                  null,
+                  "album",
+                  "artist",
+                  null,
+                  null,
+                  null,
+                  "cover",
+                  List.of(),
+                  null,
+                  null);
             });
     when(tracks.getTrack(track.getId()))
         .thenAnswer(
