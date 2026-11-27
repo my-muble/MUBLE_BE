@@ -50,6 +50,8 @@ public class RecordDetailService {
     return new RecordDetailResponse(
         local.recordId(),
         local.authorId(),
+        local.authorNickname(),
+        local.authorProfileImageUrl(),
         music,
         local.rating(),
         local.content(),

@@ -8,6 +8,16 @@ import java.time.LocalDateTime;
 public record RecordDetailResponse(
     @Schema(description = "기록 ID", requiredMode = Schema.RequiredMode.REQUIRED) Long recordId,
     @Schema(description = "작성자 ID", requiredMode = Schema.RequiredMode.REQUIRED) Long authorId,
+    @Schema(
+            description = "작성자 닉네임. 없으면 null",
+            types = {"string", "null"},
+            requiredMode = Schema.RequiredMode.REQUIRED)
+        String authorNickname,
+    @Schema(
+            description = "작성자 프로필 이미지 URL. 현재는 null",
+            types = {"string", "null"},
+            requiredMode = Schema.RequiredMode.REQUIRED)
+        String authorProfileImageUrl,
     @Schema(description = "대상 음악", requiredMode = Schema.RequiredMode.REQUIRED) Music music,
     @Schema(
             description = "별점. 미선택 시 null",

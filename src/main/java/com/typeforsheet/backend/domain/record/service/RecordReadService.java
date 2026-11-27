@@ -30,6 +30,8 @@ public class RecordReadService {
     return new RecordDetailResponse(
         record.getId(),
         record.getUser().getId(),
+        record.getUser().getNickname(),
+        null,
         new RecordDetailResponse.Music(
             record.getMusicItem().getId(), record.getMusicItem().getType(), null, null, null),
         record.getRatingHalfSteps() == null
