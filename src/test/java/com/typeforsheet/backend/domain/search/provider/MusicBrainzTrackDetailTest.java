@@ -180,6 +180,15 @@ class MusicBrainzTrackDetailTest {
       assertEquals(1, releaseDetails.get());
       provider.getTrackDetail(REC, GROUP1);
       assertEquals(5, requests.get());
+      var cold =
+          new MusicBrainzCatalogProvider(
+              JsonMapper.builder().build(),
+              "http://127.0.0.1:" + server.getAddress().getPort(),
+              "test");
+      cold.getTrackDetail(REC, GROUP1);
+      assertEquals(8, requests.get());
+      cold.getTrackDetail(REC, GROUP1);
+      assertEquals(8, requests.get());
     } finally {
       server.stop(0);
     }

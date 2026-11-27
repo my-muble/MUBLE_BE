@@ -3,11 +3,15 @@ package com.typeforsheet.backend.domain.music.service;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.sun.net.httpserver.HttpServer;
 import com.typeforsheet.backend.domain.music.entity.*;
 import com.typeforsheet.backend.domain.music.repository.*;
 import com.typeforsheet.backend.domain.search.provider.*;
 import com.typeforsheet.backend.global.exception.*;
+import java.net.InetSocketAddress;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class TrackDetailServiceTest {
@@ -18,6 +22,55 @@ class TrackDetailServiceTest {
   private final TrackDetailService service = new TrackDetailService(items, ids, catalog, artwork);
   private static final String ID = "a1234567-1234-1234-1234-123456789abc";
   private static final String GROUP = "b1234567-1234-1234-1234-123456789abc";
+
+  @Test
+  void albumThenTrackReuseCoverHttpCacheAndFailureReturnsNull() throws Exception {
+    setupTrack();
+    var album = mock(MusicItem.class);
+    when(album.getId()).thenReturn(2L);
+    when(album.getType()).thenReturn(MusicType.ALBUM);
+    when(items.findById(2L)).thenReturn(Optional.of(album));
+    var mapping = mock(MusicExternalId.class);
+    when(mapping.getExternalId()).thenReturn(GROUP);
+    when(ids.findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+            2L, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP))
+        .thenReturn(Optional.of(mapping));
+    when(catalog.getAlbumDetail(GROUP))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.AlbumDetail(
+                GROUP, "Album", "Artist", null, "2000", "Album", List.of(), true));
+    when(catalog.getTrackDetail(ID, GROUP))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.TrackDetail(
+                ID, "Track", "Artist", null, 100L, "Album", GROUP, "2000"));
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    AtomicInteger requests = new AtomicInteger();
+    server.createContext(
+        "/",
+        exchange -> {
+          requests.incrementAndGet();
+          exchange.sendResponseHeaders(
+              exchange.getRequestURI().getPath().contains(GROUP) ? 200 : 404, -1);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var cover =
+          new CoverArtArchiveArtworkProvider(
+              true, "http://127.0.0.1:" + server.getAddress().getPort());
+      var albumResult = new AlbumDetailService(items, ids, catalog, cover).getAlbum(2L);
+      assertEquals(1, requests.get());
+      var trackResult = new TrackDetailService(items, ids, catalog, cover).getTrack(1L, 2L);
+      assertEquals(albumResult.coverImageUrl(), trackResult.coverImageUrl());
+      assertEquals(1, requests.get());
+      assertNull(cover.findCoverUrl(ID));
+      assertEquals(2, requests.get());
+      assertNull(cover.findCoverUrl(ID));
+      assertEquals(2, requests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
 
   @Test
   void returnsRequestedAlbumAndRejectsInvalidAlbum() {
