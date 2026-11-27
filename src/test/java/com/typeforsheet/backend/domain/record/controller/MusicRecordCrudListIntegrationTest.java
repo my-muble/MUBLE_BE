@@ -106,6 +106,12 @@ class MusicRecordCrudListIntegrationTest {
         privateText,
         privateRating);
     JsonNode others = assertList(b, album, "others", 2, publicId, text);
+    JsonNode detail = detail(b, publicId, 200);
+    JsonNode author = find(others, publicId);
+    for (String field : List.of("authorId", "authorNickname", "authorProfileImageUrl")) {
+      assertTrue(detail.has(field));
+      assertEquals(author.path(field), detail.path(field));
+    }
     for (JsonNode item : others.path("results")) {
       assertEquals(a.getId().longValue(), item.path("authorId").asLong());
       assertEquals("author-a", item.path("authorNickname").asString());
@@ -122,7 +128,8 @@ class MusicRecordCrudListIntegrationTest {
     assertList(b, track, "others", 1, aTrack);
     assertList(b, anotherAlbum, "others", 1, otherAlbum);
     assertList(b, album, "others", 2, publicId, text);
-    verifyNoInteractions(albums, tracks);
+    verify(albums, times(1)).getAlbum(album.getId());
+    verifyNoInteractions(tracks);
   }
 
   @Test
@@ -152,6 +159,7 @@ class MusicRecordCrudListIntegrationTest {
     assertList(b, album, "others", 2, first, second);
     patch(a, first, "{\"isPrivate\":true}", 200);
     assertList(b, album, "others", 1, second);
+    detail(b, first, 404);
     patch(a, first, "{\"isPrivate\":false}", 200);
     assertList(b, album, "others", 2, first, second);
     patch(a, first, "{\"content\":null}", 200);
@@ -163,11 +171,30 @@ class MusicRecordCrudListIntegrationTest {
     assertList(b, album, "others", 2, first, second);
     remove(a, first, 200);
     detail(a, first, 404);
+    detail(b, first, 404);
     assertList(a, album, "me", 1, second);
     assertList(b, album, "others", 1, second);
     remove(a, second, 200);
     assertList(a, album, "me", 0);
     assertList(b, album, "others", 0);
+  }
+
+  @Test
+  void detailFetchReusesJoinedAuthorWithoutExtraSql() throws Exception {
+    long id = create(a, body(album.getId(), "4", "\"review\"", false));
+    var stats = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+    boolean enabled = stats.isStatisticsEnabled();
+    stats.setStatisticsEnabled(true);
+    stats.clear();
+    try {
+      JsonNode result = detail(b, id, 200);
+      assertEquals("author-a", result.path("authorNickname").asString());
+      assertEquals(2, stats.getPrepareStatementCount());
+      verify(albums, times(1)).getAlbum(album.getId());
+      verifyNoInteractions(tracks);
+    } finally {
+      stats.setStatisticsEnabled(enabled);
+    }
   }
 
   @Test

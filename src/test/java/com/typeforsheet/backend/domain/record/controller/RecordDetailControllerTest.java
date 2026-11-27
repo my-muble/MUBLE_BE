@@ -61,7 +61,17 @@ class RecordDetailControllerTest {
             invocation -> {
               assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
               return new AlbumDetailResponse(
-                  album.getId(), null, "album", "artist", null, null, null, "cover", List.of());
+                  album.getId(),
+                  null,
+                  "album",
+                  "artist",
+                  null,
+                  null,
+                  null,
+                  "cover",
+                  List.of(),
+                  null,
+                  null);
             });
     when(tracks.getTrack(track.getId()))
         .thenAnswer(
@@ -83,6 +93,9 @@ class RecordDetailControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.recordId").value(publicRecord.getId()))
         .andExpect(jsonPath("$.data.authorId").value(owner.getId()))
+        .andExpect(jsonPath("$.data.authorNickname").value("owner"))
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").doesNotExist())
         .andExpect(jsonPath("$.data.music.musicId").value(album.getId()))
         .andExpect(jsonPath("$.data.music.type").value("ALBUM"))
         .andExpect(jsonPath("$.data.music.title").value("album"))
@@ -96,9 +109,13 @@ class RecordDetailControllerTest {
         .andExpect(jsonPath("$.data.updatedAt").exists());
     mvc.perform(get("/api/records/" + publicRecord.getId()).header("Authorization", auth(other)))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.authorNickname").value("owner"))
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
         .andExpect(jsonPath("$.data.isOwner").value(false));
     mvc.perform(get("/api/records/" + privateRecord.getId()).header("Authorization", auth(owner)))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.authorNickname").value("owner"))
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
         .andExpect(jsonPath("$.data.isPrivate").value(true))
         .andExpect(jsonPath("$.data.music.type").value("TRACK"))
         .andExpect(jsonPath("$.data.music.title").value("track"));
@@ -133,13 +150,39 @@ class RecordDetailControllerTest {
         .andExpect(jsonPath("$.data.music.artistName").doesNotExist())
         .andExpect(jsonPath("$.data.music.coverImageUrl").doesNotExist())
         .andExpect(jsonPath("$.data.rating").value(4.5))
+        .andExpect(jsonPath("$.data.authorNickname").value("owner"))
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
         .andExpect(jsonPath("$.data.content").value("review"));
     mvc.perform(get("/api/records/" + privateRecord.getId()).header("Authorization", auth(owner)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.music.musicId").value(track.getId()))
         .andExpect(jsonPath("$.data.music.type").value("TRACK"))
+        .andExpect(jsonPath("$.data.authorNickname").value("owner"))
+        .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
         .andExpect(jsonPath("$.data.music.title").doesNotExist())
         .andExpect(jsonPath("$.data.content").value("private"));
+  }
+
+  @Test
+  void nullableNicknameAndPublicRecordFormsKeepAuthorInformation() throws Exception {
+    User anonymous = users.saveAndFlush(new User(null));
+    for (MusicRecord record :
+        List.of(
+            new MusicRecord(anonymous, album, (byte) 6, null, false),
+            new MusicRecord(anonymous, album, null, "text", false),
+            new MusicRecord(anonymous, album, (byte) 6, "both", false))) {
+      var saved = records.saveAndFlush(record);
+      mvc.perform(get("/api/records/" + saved.getId()).header("Authorization", auth(other)))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.authorId").value(anonymous.getId()))
+          .andExpect(jsonPath("$.data.authorNickname").hasJsonPath())
+          .andExpect(jsonPath("$.data.authorNickname").doesNotExist())
+          .andExpect(jsonPath("$.data.authorProfileImageUrl").hasJsonPath())
+          .andExpect(jsonPath("$.data.authorProfileImageUrl").doesNotExist())
+          .andExpect(jsonPath("$.data.isOwner").value(false));
+    }
+    verify(albums, times(3)).getAlbum(album.getId());
+    verifyNoInteractions(tracks);
   }
 
   @Test

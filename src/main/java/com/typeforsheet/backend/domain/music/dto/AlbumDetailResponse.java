@@ -36,7 +36,21 @@ public record AlbumDetailResponse(
     @Schema(
             description = "대표 Release의 수록곡 목록. Release가 없으면 빈 배열",
             requiredMode = Schema.RequiredMode.REQUIRED)
-        List<AlbumTrack> tracks) {
+        List<AlbumTrack> tracks,
+    @Schema(
+            description =
+                "대표 Release의 모든 디스크 수록곡 항목 수. 중복 Recording도 각각 계산하며, 빈 목록은 0, 정보 불완전 시 null",
+            types = {"integer", "null"},
+            format = "int32",
+            requiredMode = Schema.RequiredMode.REQUIRED)
+        Integer trackCount,
+    @Schema(
+            description =
+                "대표 Release의 총 재생시간(ms). 빈 목록, 정보 불완전, 재생시간 누락·음수 또는 Long 합계 초과 시 null. 0은 유효",
+            types = {"integer", "null"},
+            format = "int64",
+            requiredMode = Schema.RequiredMode.REQUIRED)
+        Long totalDurationMs) {
   public record AlbumTrack(
       @Schema(description = "매체 번호", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
           int discNumber,

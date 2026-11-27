@@ -31,7 +31,8 @@ class AlbumDetailServiceTest {
                 "artist-id",
                 "2020",
                 "Album",
-                List.of(new AlbumTrack(1, "A1", "Track", "Artist", 5000L, "recording-id"))));
+                List.of(new AlbumTrack(1, "A1", "Track", "Artist", 5000L, "recording-id")),
+                true));
     when(artwork.findCoverUrl(ID)).thenThrow(new IllegalStateException());
     var result = service.getAlbum(1L);
     assertEquals(1L, result.albumId());
@@ -39,6 +40,57 @@ class AlbumDetailServiceTest {
     assertEquals("Album", result.title());
     assertEquals("recording-id", result.tracks().get(0).recordingId());
     assertNull(result.coverImageUrl());
+    assertEquals(1, result.trackCount());
+    assertEquals(5000L, result.totalDurationMs());
+    verify(catalog).getAlbumDetail(ID);
+    verify(artwork).findCoverUrl(ID);
+  }
+
+  @Test
+  void aggregatesAllTrackEntriesAndHandlesInvalidDurations() {
+    setupAlbum();
+    var cases =
+        new Object[][] {
+          {new Long[] {180000L, 210000L, 240000L}, 630000L},
+          {new Long[] {null, 1L}, null},
+          {new Long[] {null, null}, null},
+          {new Long[] {-1L, 1L}, null},
+          {new Long[] {0L, 1L}, 1L},
+          {new Long[] {2147483647L, 1L}, 2147483648L},
+          {new Long[] {Long.MAX_VALUE, 0L}, Long.MAX_VALUE},
+          {new Long[] {Long.MAX_VALUE, 1L}, null},
+          {new Long[] {}, null}
+        };
+    for (var test : cases) {
+      Long[] durations = (Long[]) test[0];
+      var tracks = new ArrayList<AlbumTrack>();
+      for (int i = 0; i < durations.length; i++)
+        tracks.add(
+            new AlbumTrack(
+                i < 2 ? 1 : 2, String.valueOf(i + 1), "Track", "Artist", durations[i], "same-id"));
+      when(catalog.getAlbumDetail(ID))
+          .thenReturn(
+              new MusicBrainzCatalogProvider.AlbumDetail(
+                  ID, "Album", "Artist", "artist-id", "2020", "Album", tracks, true));
+      var result = service.getAlbum(1L);
+      assertEquals(durations.length, result.trackCount());
+      assertEquals(test[1], result.totalDurationMs());
+      assertEquals(tracks, result.tracks());
+    }
+  }
+
+  @Test
+  void incompleteTracksDoNotProduceAggregates() {
+    setupAlbum();
+    var tracks = List.of(new AlbumTrack(1, "1", "Track", "Artist", 100L, "id"));
+    when(catalog.getAlbumDetail(ID))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.AlbumDetail(
+                ID, "Album", "Artist", "artist-id", "2020", "Album", tracks, false));
+    var result = service.getAlbum(1L);
+    assertNull(result.trackCount());
+    assertNull(result.totalDurationMs());
+    assertEquals(tracks, result.tracks());
   }
 
   @Test

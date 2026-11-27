@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.music.controller;
 
+import static org.hamcrest.Matchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -38,12 +39,38 @@ class AlbumControllerTest {
                 "2020",
                 "Album",
                 null,
-                List.of()));
+                List.of(),
+                0,
+                null));
     mvc.perform(
             get("/api/albums/1").header("Authorization", "Bearer " + tokens.createAccessToken(1L)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.albumId").value(1))
-        .andExpect(jsonPath("$.data.reference.id").value("mbid"));
+        .andExpect(jsonPath("$.data.reference.id").value("mbid"))
+        .andExpect(jsonPath("$.data.trackCount").value(0))
+        .andExpect(jsonPath("$.data.totalDurationMs").value(nullValue()));
+  }
+
+  @Test
+  void serializesNumericAndUnknownAggregates() throws Exception {
+    var ref = new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "mbid");
+    when(service.getAlbum(1L))
+        .thenReturn(
+            new AlbumDetailResponse(
+                1L, ref, "Album", null, null, null, null, null, List.of(), 2, 630000L),
+            new AlbumDetailResponse(
+                1L, ref, "Album", null, null, null, null, null, List.of(), null, null));
+    var request =
+        get("/api/albums/1").header("Authorization", "Bearer " + tokens.createAccessToken(1L));
+    mvc.perform(request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.trackCount").isNumber())
+        .andExpect(jsonPath("$.data.totalDurationMs").isNumber())
+        .andExpect(jsonPath("$.data.totalDurationMs").value(630000));
+    mvc.perform(request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.trackCount").value(nullValue()))
+        .andExpect(jsonPath("$.data.totalDurationMs").value(nullValue()));
   }
 }

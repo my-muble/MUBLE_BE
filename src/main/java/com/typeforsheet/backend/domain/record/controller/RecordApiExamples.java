@@ -33,7 +33,15 @@ final class RecordApiExamples {
   static final String UPDATED =
       "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 수정에 성공했습니다.\",\"data\":{\"recordId\":1,\"musicId\":123,\"musicType\":\"ALBUM\",\"rating\":null,\"content\":\"새 감상\",\"isPrivate\":true,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:05:00\"}}";
   static final String DETAIL =
-      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":null,\"artistName\":null,\"coverImageUrl\":null},\"rating\":4.5,\"content\":\"다시 듣고 싶은 앨범\",\"isPrivate\":false,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":true}}";
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"authorNickname\":\"뮤블사용자\",\"authorProfileImageUrl\":null,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":null,\"artistName\":null,\"coverImageUrl\":null},\"rating\":4.5,\"content\":\"다시 듣고 싶은 앨범\",\"isPrivate\":false,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":true}}";
   static final String DELETE =
       "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 삭제에 성공했습니다.\",\"data\":null}";
+  static final String DETAIL_OWNER_PUBLIC =
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"authorNickname\":\"뮤블사용자\",\"authorProfileImageUrl\":null,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":\"Palette\",\"artistName\":\"IU\",\"coverImageUrl\":null},\"rating\":4.5,\"content\":\"앨범을 다시 듣고 싶어요.\",\"isPrivate\":false,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":true}}";
+  static final String DETAIL_OWNER_PRIVATE =
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"authorNickname\":\"뮤블사용자\",\"authorProfileImageUrl\":null,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":\"Palette\",\"artistName\":\"IU\",\"coverImageUrl\":null},\"rating\":4.5,\"content\":\"나만 간직할 감상입니다.\",\"isPrivate\":true,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":true}}";
+  static final String DETAIL_OTHER_RATING =
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"authorNickname\":\"뮤블사용자\",\"authorProfileImageUrl\":null,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":\"Palette\",\"artistName\":\"IU\",\"coverImageUrl\":null},\"rating\":4.5,\"content\":null,\"isPrivate\":false,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":false}}";
+  static final String DETAIL_OTHER_TEXT =
+      "{\"success\":true,\"code\":\"SUCCESS\",\"message\":\"음악 기록 조회에 성공했습니다.\",\"data\":{\"recordId\":1,\"authorId\":10,\"authorNickname\":null,\"authorProfileImageUrl\":null,\"music\":{\"musicId\":123,\"type\":\"ALBUM\",\"title\":\"Palette\",\"artistName\":\"IU\",\"coverImageUrl\":null},\"rating\":null,\"content\":\"가사가 아닌 감상평 예시입니다.\",\"isPrivate\":false,\"createdAt\":\"2026-11-21T18:00:00\",\"updatedAt\":\"2026-11-21T18:00:00\",\"isOwner\":false}}";
 }

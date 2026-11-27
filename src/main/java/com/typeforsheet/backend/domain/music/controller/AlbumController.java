@@ -33,6 +33,7 @@ public class AlbumController {
           albumId는 MusicBrainz MBID가 아닌 MUBLE 내부 ALBUM ID입니다. Release Group 정보와 대표 Release의 수록곡을 반환합니다.
           대표 Release는 공식 발매를 우선하고 발매일이 빠른 순, 동점이면 Release MBID 순으로 선택합니다.
           수록곡의 recordingId는 MusicBrainz 외부 ID이며 내부 곡 ID를 생성하지 않습니다. durationMs는 밀리초입니다.
+          trackCount와 totalDurationMs는 전체 Release Group이 아닌 대표 Release의 모든 디스크를 집계합니다. 동일 Recording도 트랙마다 계산하며 집계만을 위한 추가 외부 호출은 없습니다.
           커버가 없거나 조회에 실패하면 null입니다. 유효한 Access Token이 필요합니다.
           """)
   @ApiResponses({
@@ -43,7 +44,13 @@ public class AlbumController {
             @Content(
                 mediaType = "application/json",
                 schema = @Schema(implementation = MusicSuccessSchemas.Album.class),
-                examples = @ExampleObject(value = MusicApiExamples.ALBUM_OK))),
+                examples = {
+                  @ExampleObject(name = "단일 디스크", value = MusicApiExamples.ALBUM_OK),
+                  @ExampleObject(name = "여러 디스크", value = MusicApiExamples.ALBUM_MULTI),
+                  @ExampleObject(name = "시간 누락", value = MusicApiExamples.ALBUM_MISSING_DURATION),
+                  @ExampleObject(name = "빈 목록", value = MusicApiExamples.ALBUM_EMPTY),
+                  @ExampleObject(name = "정보 불완전", value = MusicApiExamples.ALBUM_INCOMPLETE)
+                })),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
         description = "숫자가 아니거나 Long 범위 밖 또는 0 이하 ID",

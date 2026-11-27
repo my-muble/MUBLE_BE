@@ -17,6 +17,8 @@ class MusicBrainzTrackDetailTest {
   private static final String RELEASE2 = "d1234567-1234-1234-1234-123456789abc";
   private static final String GROUP1 = "e1234567-1234-1234-1234-123456789abc";
   private static final String GROUP2 = "f1234567-1234-1234-1234-123456789abc";
+  private static final String ALIAS = "01234567-1234-1234-1234-123456789abc";
+  private static final String MISSING = "11234567-1234-1234-1234-123456789abc";
 
   @Test
   void parsesRecordingSelectsAlbumAcrossPagesAndAllowsNoAlbum() throws Exception {
@@ -29,12 +31,34 @@ class MusicBrainzTrackDetailTest {
           String path = exchange.getRequestURI().getPath();
           String query = exchange.getRequestURI().getRawQuery();
           String json;
+          if (path.equals("/ws/2/release-group/" + ALIAS)) {
+            exchange
+                .getResponseHeaders()
+                .add("Location", "/ws/2/release-group/" + GROUP1 + "?fmt=json&inc=artist-credits");
+            exchange.sendResponseHeaders(301, -1);
+            exchange.close();
+            return;
+          }
+          if (path.equals("/ws/2/release-group/" + MISSING)) {
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+            return;
+          }
           if (path.equals("/ws/2/recording/" + REC) || path.equals("/ws/2/recording/" + NO_ALBUM)) {
             String id = path.substring(path.lastIndexOf('/') + 1);
             json =
                 "{\"id\":\""
                     + id
                     + "\",\"title\":\"Track\",\"length\":1234,\"artist-credit\":[{\"name\":\"Artist\",\"artist\":{\"id\":\"artist-id\"}}]}";
+          } else if (path.equals("/ws/2/release-group/" + GROUP1)
+              || path.equals("/ws/2/release-group/" + GROUP2)) {
+            String id = path.substring(path.lastIndexOf('/') + 1);
+            json =
+                "{\"id\":\""
+                    + id
+                    + "\",\"title\":\"Group "
+                    + id
+                    + "\",\"first-release-date\":\"1980\"}";
           } else if (query.contains(NO_ALBUM)) {
             json = "{\"release-count\":0,\"releases\":[]}";
           } else if (query.contains("offset=0")) {
@@ -74,10 +98,128 @@ class MusicBrainzTrackDetailTest {
       assertEquals("2000", track.releaseDate());
       provider.getTrackDetail(REC);
       assertEquals(3, requests.get());
+      var firstGroup = provider.getTrackDetail(REC, GROUP1);
+      assertEquals(GROUP1, firstGroup.releaseGroupId());
+      assertEquals("Group " + GROUP1, firstGroup.albumTitle());
+      assertEquals("1980", firstGroup.releaseDate());
+      var secondGroup = provider.getTrackDetail(REC, GROUP2);
+      assertEquals(GROUP2, secondGroup.releaseGroupId());
+      assertEquals("Group " + GROUP2, secondGroup.albumTitle());
+      assertEquals("Original", provider.getTrackDetail(REC).albumTitle());
+      assertEquals(5, requests.get());
+      assertEquals(GROUP1, provider.getTrackDetail(REC, GROUP1).releaseGroupId());
+      assertEquals(5, requests.get());
+      assertEquals(GROUP1, provider.getTrackDetail(REC, ALIAS).releaseGroupId());
+      assertEquals(
+          ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND,
+          assertThrows(BusinessException.class, () -> provider.getTrackDetail(REC, MISSING))
+              .getErrorCode());
+      assertEquals(
+          ErrorCode.INVALID_REQUEST,
+          assertThrows(BusinessException.class, () -> provider.getTrackDetail(NO_ALBUM, GROUP1))
+              .getErrorCode());
       var noAlbum = provider.getTrackDetail(NO_ALBUM);
       assertNull(noAlbum.albumTitle());
       assertNull(noAlbum.releaseGroupId());
       assertNull(noAlbum.releaseDate());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void albumThenTrackReusesGroupAndDoesNotFetchAlbumTracksAgain() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    AtomicInteger requests = new AtomicInteger();
+    AtomicInteger releaseDetails = new AtomicInteger();
+    server.createContext(
+        "/ws/2/",
+        exchange -> {
+          requests.incrementAndGet();
+          String path = exchange.getRequestURI().getPath();
+          String query = exchange.getRequestURI().getRawQuery();
+          String json;
+          if (path.equals("/ws/2/release-group/" + GROUP1))
+            json =
+                "{\"id\":\""
+                    + GROUP1
+                    + "\",\"title\":\"Group title\",\"first-release-date\":\"1980\"}";
+          else if (path.equals("/ws/2/recording/" + REC))
+            json = "{\"id\":\"" + REC + "\",\"title\":\"Track\"}";
+          else if (path.equals("/ws/2/release/" + RELEASE1)) {
+            releaseDetails.incrementAndGet();
+            json = "{\"id\":\"" + RELEASE1 + "\",\"media\":[{\"tracks\":[]}]}";
+          } else if (path.equals("/ws/2/release") && query.contains("release-group="))
+            json = "{\"release-count\":1,\"releases\":[{\"id\":\"" + RELEASE1 + "\"}]}";
+          else
+            json =
+                "{\"release-count\":1,\"releases\":[{\"id\":\""
+                    + RELEASE2
+                    + "\",\"release-group\":{\"id\":\""
+                    + GROUP1
+                    + "\"}}]}";
+          byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var provider =
+          new MusicBrainzCatalogProvider(
+              JsonMapper.builder().build(),
+              "http://127.0.0.1:" + server.getAddress().getPort(),
+              "test");
+      var album = provider.getAlbumDetail(GROUP1);
+      assertEquals(3, requests.get());
+      var track = provider.getTrackDetail(REC, GROUP1);
+      assertEquals(5, requests.get());
+      assertEquals(album.title(), track.albumTitle());
+      assertEquals(album.releaseDate(), track.releaseDate());
+      assertEquals(GROUP1, track.releaseGroupId());
+      assertEquals(1, releaseDetails.get());
+      provider.getTrackDetail(REC, GROUP1);
+      assertEquals(5, requests.get());
+      var cold =
+          new MusicBrainzCatalogProvider(
+              JsonMapper.builder().build(),
+              "http://127.0.0.1:" + server.getAddress().getPort(),
+              "test");
+      cold.getTrackDetail(REC, GROUP1);
+      assertEquals(8, requests.get());
+      cold.getTrackDetail(REC, GROUP1);
+      assertEquals(8, requests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void incompleteReleaseBrowseIsAnUpstreamErrorNotNonmembership() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/ws/2/",
+        exchange -> {
+          String json =
+              exchange.getRequestURI().getPath().contains("/recording/")
+                  ? "{\"id\":\"" + REC + "\",\"title\":\"Track\"}"
+                  : "{\"release-count\":1,\"releases\":[]}";
+          byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var provider =
+          new MusicBrainzCatalogProvider(
+              JsonMapper.builder().build(),
+              "http://127.0.0.1:" + server.getAddress().getPort(),
+              "test");
+      assertEquals(
+          ErrorCode.MUSIC_CATALOG_UNAVAILABLE,
+          assertThrows(BusinessException.class, () -> provider.getTrackDetail(REC, GROUP1))
+              .getErrorCode());
     } finally {
       server.stop(0);
     }

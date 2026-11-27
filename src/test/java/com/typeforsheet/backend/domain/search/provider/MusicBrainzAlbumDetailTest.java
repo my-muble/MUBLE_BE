@@ -51,7 +51,7 @@ class MusicBrainzAlbumDetailTest {
                     + R3
                     + "\",\"media\":[{\"position\":1,\"tracks\":[{\"number\":\"A1\",\"title\":\"Track title\",\"length\":1234,\"artist-credit\":[{\"name\":\"Guest\"}],\"recording\":{\"id\":\""
                     + REC
-                    + "\",\"title\":\"Recording title\"}},{\"number\":\"2\",\"recording\":{\"id\":\""
+                    + "\",\"title\":\"Recording title\",\"length\":9999}},{\"number\":\"2\",\"recording\":{\"id\":\""
                     + REC
                     + "\",\"title\":\"Fallback\",\"length\":5000}}]}]}";
           } else {
@@ -72,6 +72,7 @@ class MusicBrainzAlbumDetailTest {
               "http://127.0.0.1:" + server.getAddress().getPort(),
               "test");
       var album = provider.getAlbumDetail(GROUP);
+      assertTrue(album.tracksComplete());
       assertEquals("Artist", album.artistName());
       assertEquals("artist-id", album.artistId());
       assertEquals(2, album.tracks().size());
@@ -87,6 +88,67 @@ class MusicBrainzAlbumDetailTest {
       assertEquals(4, count.get());
       provider.getAlbumDetail(GROUP);
       assertEquals(4, count.get());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void distinguishesAbsentReleaseAndDeclaredIncompleteLists() throws Exception {
+    assertFalse(readAlbum(null).tracksComplete());
+    assertTrue(readAlbum("{\"media\":[]}").tracksComplete());
+    assertTrue(readAlbum("{\"media\":[{\"tracks\":[]}]}").tracksComplete());
+    assertFalse(readAlbum("{\"medium-count\":2,\"media\":[{\"tracks\":[]}]}").tracksComplete());
+    assertFalse(readAlbum("{\"media\":[{\"track-count\":2,\"tracks\":[{}]}]}").tracksComplete());
+    assertFalse(readAlbum("{\"media\":[{\"track-count\":0,\"tracks\":[{}]}]}").tracksComplete());
+    assertTrue(
+        readAlbum(
+                "{\"medium-count\":2,\"media\":[{\"track-count\":1,\"tracks\":[{}]},{\"track-count\":1,\"tracks\":[{}]}]}")
+            .tracksComplete());
+    var partial = readAlbum("{\"media\":[{\"track-count\":2,\"tracks\":[{\"number\":\"A1\"}]}]}");
+    assertFalse(partial.tracksComplete());
+    assertEquals("A1", partial.tracks().get(0).trackNumber());
+  }
+
+  @Test
+  void malformedMediaAndTracksKeepExistingErrorPolicy() throws Exception {
+    assertEquals(
+        ErrorCode.MUSIC_CATALOG_UNAVAILABLE,
+        assertThrows(BusinessException.class, () -> readAlbum("{}")).getErrorCode());
+    assertEquals(
+        ErrorCode.MUSIC_CATALOG_UNAVAILABLE,
+        assertThrows(BusinessException.class, () -> readAlbum("{\"media\":[{}]}")).getErrorCode());
+  }
+
+  private MusicBrainzCatalogProvider.AlbumDetail readAlbum(String detail) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/ws/2/",
+        exchange -> {
+          String path = exchange.getRequestURI().getPath();
+          String json;
+          if (path.contains("release-group/"))
+            json = "{\"id\":\"" + GROUP + "\",\"title\":\"Album\"}";
+          else if (path.endsWith("/release"))
+            json =
+                detail == null
+                    ? "{\"release-count\":0,\"releases\":[]}"
+                    : "{\"release-count\":1,\"releases\":[{\"id\":\"" + R1 + "\"}]}";
+          else
+            json =
+                "{\"id\":\"" + R1 + "\"" + (detail.equals("{}") ? "}" : "," + detail.substring(1));
+          byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      return new MusicBrainzCatalogProvider(
+              JsonMapper.builder().build(),
+              "http://127.0.0.1:" + server.getAddress().getPort(),
+              "test")
+          .getAlbumDetail(GROUP);
     } finally {
       server.stop(0);
     }

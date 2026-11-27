@@ -324,7 +324,8 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String artistId,
       String releaseDate,
       String releaseType,
-      List<AlbumTrack> tracks) {}
+      List<AlbumTrack> tracks,
+      boolean tracksComplete) {}
 
   public record TrackDetail(
       String recordingId,
@@ -337,6 +338,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String releaseDate) {}
 
   public TrackDetail getTrackDetail(String id) {
+    return getTrackDetail(id, null);
+  }
+
+  public TrackDetail getTrackDetail(String id, String albumGroupId) {
     JsonNode recording =
         requestUrl(
             baseUrl + "/ws/2/recording/" + id + "?fmt=json&inc=artist-credits",
@@ -373,6 +378,29 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       offset += size;
       if (offset >= count) break;
       if (size == 0) throw invalidData("recording_release_empty_page");
+    }
+    if (albumGroupId != null) {
+      JsonNode group =
+          requestUrl(
+              baseUrl + "/ws/2/release-group/" + albumGroupId + "?fmt=json&inc=artist-credits",
+              true,
+              response -> validUuid(value(response, "id")) && value(response, "title") != null);
+      if (group == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
+      String canonicalGroupId = value(group, "id");
+      if (releases.stream()
+          .noneMatch(
+              release -> canonicalGroupId.equals(value(release.path("release-group"), "id"))))
+        throw new BusinessException(ErrorCode.INVALID_REQUEST);
+      JsonNode length = recording.path("length");
+      return new TrackDetail(
+          recordingId,
+          title,
+          artistCredit(recording),
+          firstArtistId(recording),
+          length.isIntegralNumber() ? length.asLong() : null,
+          value(group, "title"),
+          canonicalGroupId,
+          value(group, "first-release-date"));
     }
     releases.sort(Comparator.comparing(release -> value(release, "id")));
     var selected = RepresentativeReleaseSelector.select(recording, releases);
@@ -438,6 +466,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
             .orElse(null);
     if (!releases.isEmpty() && selected == null) throw invalidData("album_release_selection");
     List<AlbumTrack> tracks = new ArrayList<>();
+    boolean tracksComplete = selected != null;
     if (selected != null) {
       String releaseId = value(selected, "id");
       JsonNode release =
@@ -450,10 +479,12 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
               this::validReleaseDetail);
       if (release == null || !release.path("media").isArray())
         throw invalidData(release == null ? "album_release_not_found" : "album_release_media");
+      tracksComplete = declaredCountMatches(release, "medium-count", release.path("media").size());
       int discIndex = 0;
       for (JsonNode medium : release.path("media")) {
         int discNumber = medium.path("position").asInt(++discIndex);
         if (!medium.path("tracks").isArray()) throw invalidData("album_release_tracks");
+        tracksComplete &= declaredCountMatches(medium, "track-count", medium.path("tracks").size());
         for (JsonNode track : medium.path("tracks")) {
           JsonNode recording = track.path("recording");
           String trackTitle = value(track, "title");
@@ -475,6 +506,7 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
                   value(recording, "id")));
         }
       }
+      tracksComplete &= declaredCountMatches(release, "track-count", tracks.size());
     }
     return new AlbumDetail(
         groupId,
@@ -483,7 +515,14 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
         firstArtistId(group),
         value(group, "first-release-date"),
         value(group, "primary-type"),
-        List.copyOf(tracks));
+        List.copyOf(tracks),
+        tracksComplete);
+  }
+
+  private boolean declaredCountMatches(JsonNode node, String field, int actualCount) {
+    JsonNode count = node.path(field);
+    return count.isMissingNode()
+        || (count.isIntegralNumber() && count.canConvertToLong() && count.asLong() == actualCount);
   }
 
   private boolean validUuid(String value) {

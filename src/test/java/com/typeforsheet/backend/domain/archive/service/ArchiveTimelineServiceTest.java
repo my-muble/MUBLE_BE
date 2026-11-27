@@ -130,7 +130,9 @@ class ArchiveTimelineServiceTest {
         null,
         null,
         cover,
-        List.of());
+        List.of(),
+        null,
+        null);
   }
 
   private TrackDetailResponse track(Long id, String releaseGroupId, String cover) {

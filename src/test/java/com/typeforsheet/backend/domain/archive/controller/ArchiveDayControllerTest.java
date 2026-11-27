@@ -89,13 +89,15 @@ class ArchiveDayControllerTest {
                 null,
                 null,
                 "cover-a",
-                List.of()));
+                List.of(),
+                null,
+                null));
     when(tracks.getTrack(track.getId())).thenReturn(track(track, "group-a"));
     when(tracks.getTrack(trackOnly.getId())).thenReturn(track(trackOnly, "group-b"));
     when(catalog.getAlbumDetail("group-b"))
         .thenReturn(
             new MusicBrainzCatalogProvider.AlbumDetail(
-                "group-b", "Album B", "Album Artist B", null, null, null, List.of()));
+                "group-b", "Album B", "Album Artist B", null, null, null, List.of(), true));
 
     mvc.perform(get(URL).header("Authorization", bearer(owner)))
         .andExpect(status().isOk())
@@ -141,7 +143,9 @@ class ArchiveDayControllerTest {
                 "cover-a",
                 List.of(
                     new AlbumTrack(1, "1", "Unrecorded", null, null, "unrecorded"),
-                    new AlbumTrack(1, "2", "Recorded", null, null, "recorded"))));
+                    new AlbumTrack(1, "2", "Recorded", null, null, "recorded")),
+                null,
+                null));
     when(tracks.getTrack(track.getId()))
         .thenReturn(
             new TrackDetailResponse(
@@ -206,7 +210,8 @@ class ArchiveDayControllerTest {
                 null,
                 null,
                 null,
-                List.of(new AlbumTrack(1, "1", "Track C", null, null, "track-c"))));
+                List.of(new AlbumTrack(1, "1", "Track C", null, null, "track-c")),
+                true));
     mvc.perform(get(URL + "/albums/group-c").header("Authorization", bearer(owner)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.album.albumId").doesNotExist())
@@ -253,7 +258,8 @@ class ArchiveDayControllerTest {
                 null,
                 null,
                 null,
-                List.of(new AlbumTrack(1, "2", "Track title", null, null, "selected-track"))));
+                List.of(new AlbumTrack(1, "2", "Track title", null, null, "selected-track")),
+                true));
 
     String path = URL + "/albums/group-a/tracks/" + track.getId();
     mvc.perform(get(path)).andExpect(status().isUnauthorized());

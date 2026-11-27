@@ -401,7 +401,9 @@ class HomeRankingControllerTest {
                 null,
                 null,
                 "cover",
-                List.of()));
+                List.of(),
+                null,
+                null));
   }
 
   private void save(

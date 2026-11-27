@@ -48,6 +48,23 @@ public class AlbumDetailService {
         album.releaseDate(),
         album.releaseType(),
         cover,
-        album.tracks());
+        album.tracks(),
+        album.tracksComplete() ? album.tracks().size() : null,
+        totalDuration(album));
+  }
+
+  private Long totalDuration(MusicBrainzCatalogProvider.AlbumDetail album) {
+    if (!album.tracksComplete() || album.tracks().isEmpty()) return null;
+    long total = 0;
+    for (var track : album.tracks()) {
+      Long duration = track.durationMs();
+      if (duration == null || duration < 0) return null;
+      try {
+        total = Math.addExact(total, duration);
+      } catch (ArithmeticException overflow) {
+        return null;
+      }
+    }
+    return total;
   }
 }
