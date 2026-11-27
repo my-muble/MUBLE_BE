@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.archive.controller;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveTimelineResponse;
 import com.typeforsheet.backend.domain.archive.service.ArchiveTimelineService;
 import com.typeforsheet.backend.global.exception.BusinessException;
@@ -10,12 +11,15 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
 import java.time.Year;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -50,6 +54,38 @@ public class ArchiveController {
     ArchiveTimelineResponse response =
         archiveTimelineService.getTimeline(Long.valueOf(jwt.getSubject()), selectedYear);
     return ApiResponse.success("시간순 아카이브 조회에 성공했습니다.", response);
+  }
+
+  @GetMapping("/timeline/{date}")
+  @Operation(
+      summary = "날짜별 아카이브 상세 목록 조회",
+      description =
+          """
+          한국 시간 기준 선택 날짜의 본인 앨범·곡 기록을 조회합니다.
+          공개 여부와 무관하게 포함하며 같은 앨범의 기록은 한 행으로 묶습니다.
+          앨범 행은 가장 최근 기록의 작성 시각 기준 최신순입니다.
+          """)
+  public ApiResponse<ArchiveDayResponse> getDay(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(
+              description = "조회할 기록 작성일(YYYY-MM-DD)",
+              schema = @Schema(type = "string", format = "date", example = "2026-09-25"))
+          @PathVariable
+          String date) {
+    return ApiResponse.success(
+        "날짜별 아카이브 조회에 성공했습니다.",
+        archiveTimelineService.getDay(Long.valueOf(jwt.getSubject()), parseDate(date)));
+  }
+
+  private LocalDate parseDate(String date) {
+    if (!date.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}") || date.startsWith("0000-")) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    }
+    try {
+      return LocalDate.parse(date);
+    } catch (DateTimeParseException exception) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
+    }
   }
 
   private int parseYear(String year) {

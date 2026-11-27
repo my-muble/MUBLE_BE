@@ -13,9 +13,11 @@ import com.typeforsheet.backend.domain.archive.repository.ArchiveRepository;
 import com.typeforsheet.backend.domain.music.dto.AlbumDetailResponse;
 import com.typeforsheet.backend.domain.music.dto.TrackDetailResponse;
 import com.typeforsheet.backend.domain.music.entity.MusicType;
+import com.typeforsheet.backend.domain.music.repository.MusicExternalIdRepository;
 import com.typeforsheet.backend.domain.music.service.AlbumDetailService;
 import com.typeforsheet.backend.domain.music.service.TrackDetailService;
 import com.typeforsheet.backend.domain.search.dto.response.MusicSearchResponses.ExternalReference;
+import com.typeforsheet.backend.domain.search.provider.MusicBrainzCatalogProvider;
 import com.typeforsheet.backend.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,7 +38,14 @@ class ArchiveTimelineServiceTest {
     users = mock(UserRepository.class);
     albums = mock(AlbumDetailService.class);
     tracks = mock(TrackDetailService.class);
-    service = new ArchiveTimelineService(archives, users, albums, tracks);
+    service =
+        new ArchiveTimelineService(
+            archives,
+            users,
+            albums,
+            tracks,
+            mock(MusicExternalIdRepository.class),
+            mock(MusicBrainzCatalogProvider.class));
     when(users.existsById(1L)).thenReturn(true);
     when(archives.existsByUser_Id(1L)).thenReturn(true);
   }
