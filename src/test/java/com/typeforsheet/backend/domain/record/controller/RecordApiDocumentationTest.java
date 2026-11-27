@@ -106,6 +106,28 @@ class RecordApiDocumentationTest {
     }
     assertTrue(keyRequired);
     JsonNode schemas = root.path("components").path("schemas");
+    JsonNode detail = schemas.path("RecordDetailResponse");
+    for (String name : new String[] {"authorNickname", "authorProfileImageUrl"}) {
+      assertNullType(detail.path("properties").path(name), "string");
+      assertTrue(detail.path("required").toString().contains(name));
+    }
+    JsonNode detailExamples =
+        item.path("get")
+            .path("responses")
+            .path("200")
+            .path("content")
+            .path("application/json")
+            .path("examples");
+    assertEquals(5, detailExamples.size());
+    detailExamples
+        .properties()
+        .forEach(
+            entry -> {
+              JsonNode data = entry.getValue().path("value").path("data");
+              assertTrue(data.has("authorNickname"));
+              assertTrue(data.has("authorProfileImageUrl"));
+              assertTrue(data.path("authorProfileImageUrl").isNull());
+            });
     assertTrue(schemas.path("CreateRecordRequest").path("properties").has("isPrivate"));
     JsonNode patchProperties = schemas.path("UpdateRecordRequest").path("properties");
     assertTrue(patchProperties.has("rating"));

@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.music.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -15,18 +16,86 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 class MusicApiDocumentationTest {
   @Autowired MockMvc mvc;
   @Autowired JwtTokenProvider tokens;
+  @Autowired JsonMapper mapper;
   @MockitoBean MusicResolveService resolve;
   @MockitoBean AlbumDetailService albums;
   @MockitoBean TrackDetailService tracks;
 
   private String auth() {
     return "Bearer " + tokens.createAccessToken(1L);
+  }
+
+  @Test
+  void documentsAlbumAggregatesAndOptionalTrackAlbum() throws Exception {
+    JsonNode root =
+        mapper.readTree(
+            mvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    assertTrue(root.path("openapi").asText().startsWith("3.1"));
+    JsonNode album = root.path("components").path("schemas").path("AlbumDetailResponse");
+    for (String field : new String[] {"trackCount", "totalDurationMs"}) {
+      JsonNode schema = album.path("properties").path(field);
+      assertTrue(schema.path("type").toString().contains("integer"), schema.toString());
+      assertTrue(schema.path("type").toString().contains("null"), schema.toString());
+      assertTrue(album.path("required").toString().contains(field));
+      assertEquals(field.equals("trackCount") ? "int32" : "int64", schema.path("format").asText());
+    }
+    assertTrue(album.path("properties").has("tracks"));
+    JsonNode operation = root.path("paths").path("/api/tracks/{trackId}").path("get");
+    JsonNode parameter = null;
+    for (JsonNode p : operation.path("parameters"))
+      if (p.path("name").asText().equals("albumId")) parameter = p;
+    assertNotNull(parameter);
+    assertEquals("query", parameter.path("in").asText());
+    assertFalse(parameter.path("required").asBoolean());
+    assertEquals("integer", parameter.path("schema").path("type").asText());
+    assertEquals("int64", parameter.path("schema").path("format").asText());
+    assertEquals(1, parameter.path("schema").path("minimum").asInt());
+    for (String status : new String[] {"200", "400", "401", "404", "500", "502"})
+      assertTrue(operation.path("responses").has(status));
+    JsonNode examples =
+        root.path("paths")
+            .path("/api/albums/{albumId}")
+            .path("get")
+            .path("responses")
+            .path("200")
+            .path("content")
+            .path("application/json")
+            .path("examples");
+    assertEquals(5, examples.size());
+    examples
+        .properties()
+        .forEach(
+            entry -> {
+              JsonNode data = entry.getValue().path("value").path("data");
+              JsonNode count = data.path("trackCount"), total = data.path("totalDurationMs");
+              if (!count.isNull()) assertEquals(count.asInt(), data.path("tracks").size());
+              if (!total.isNull()) {
+                long sum = 0;
+                for (JsonNode track : data.path("tracks")) sum += track.path("durationMs").asLong();
+                assertEquals(sum, total.asLong());
+              }
+            });
+    assertEquals(
+        3,
+        operation
+            .path("responses")
+            .path("200")
+            .path("content")
+            .path("application/json")
+            .path("examples")
+            .size());
   }
 
   @Test

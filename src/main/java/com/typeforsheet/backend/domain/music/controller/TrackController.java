@@ -33,9 +33,11 @@ public class TrackController {
           trackId는 MusicBrainz MBID가 아닌 MUBLE 내부 TRACK ID입니다. 연결된 Recording MBID로 MusicBrainz를 조회합니다.
           선택적 albumId는 내부 ALBUM ID이며 지정하면 해당 Release Group에 수록된 곡인지 확인하고 앨범 상세와 같은 제목, 커버, 최초 발매일을 반환합니다.
           albumId를 생략하면 기존 대표 앨범을 반환합니다. 곡의 내부 ID와 기록 범위는 변경되지 않습니다.
+          요청 예: GET /api/tracks/456 또는 GET /api/tracks/456?albumId=123.
+          albumId는 Release 또는 Release Group MBID가 아니며 빈 문자열은 허용하지 않습니다. 대표 Release가 아닌 같은 Release Group의 다른 발매본에 수록되어도 소속으로 인정합니다. 잘못 지정된 앨범을 대표 앨범으로 대체하지 않습니다.
           대표 앨범은 공식 발매, 아티스트 일치, 컴필레이션·라이브·리믹스 등이 아닌 유형과 Album/EP/Single에 점수를 부여하고,
           동점이면 이른 발매일과 Release MBID 순으로 선택합니다. 앨범이 없으면 albumTitle, releaseGroupId, coverImageUrl은 null입니다.
-          releaseDate는 albumTitle과 동일한 대표 Release의 발매일이며 정보가 없으면 null입니다.
+          albumId 미지정 시 releaseDate는 대표 Release 발매일이며 지정 시 Release Group 최초 발매일입니다. 정보가 없으면 null입니다.
           커버가 없거나 조회에 실패해도 null이며 durationMs는 밀리초입니다. 다른 내부 음악 ID를 생성하지 않습니다. Access Token이 필요합니다.
           """)
   @ApiResponses({
@@ -46,10 +48,14 @@ public class TrackController {
             @Content(
                 mediaType = "application/json",
                 schema = @Schema(implementation = MusicSuccessSchemas.Track.class),
-                examples = @ExampleObject(value = MusicApiExamples.TRACK_OK))),
+                examples = {
+                  @ExampleObject(name = "대표 앨범", value = MusicApiExamples.TRACK_OK),
+                  @ExampleObject(name = "지정 앨범 A", value = MusicApiExamples.TRACK_ALBUM_A),
+                  @ExampleObject(name = "지정 앨범 B 커버 없음", value = MusicApiExamples.TRACK_ALBUM_B)
+                })),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "숫자가 아니거나 Long 범위 밖 또는 0 이하 ID",
+        description = "INVALID_REQUEST: 잘못된 ID 또는 지정 앨범에 곡이 속하지 않음",
         content =
             @Content(
                 mediaType = "application/json",
@@ -63,12 +69,13 @@ public class TrackController {
                 examples = @ExampleObject(value = MusicApiExamples.AUTH))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
-        description = "내부 곡 또는 외부 Recording 없음",
+        description = "내부 곡·앨범 또는 외부 음악 없음",
         content =
             @Content(
                 mediaType = "application/json",
                 examples = {
                   @ExampleObject(name = "내부 ID", value = MusicApiExamples.TRACK_NOT_FOUND),
+                  @ExampleObject(name = "앨범 ID", value = MusicApiExamples.ALBUM_NOT_FOUND),
                   @ExampleObject(name = "외부 ID", value = MusicApiExamples.EXTERNAL_NOT_FOUND)
                 })),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -98,8 +105,8 @@ public class TrackController {
           @PathVariable
           String trackId,
       @Parameter(
-              description = "선택적 MUBLE 내부 앨범 ID",
-              schema = @Schema(type = "integer", format = "int64"))
+              description = "선택적 MUBLE 내부 ALBUM ID. 양의 정수이며 외부 MBID가 아닙니다. 생략 가능, 빈 문자열 불가",
+              schema = @Schema(type = "integer", format = "int64", minimum = "1"))
           @RequestParam(required = false)
           String albumId) {
     Long id;

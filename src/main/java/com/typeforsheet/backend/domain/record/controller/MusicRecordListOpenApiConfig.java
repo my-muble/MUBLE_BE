@@ -16,21 +16,21 @@ class MusicRecordListOpenApiConfig {
       api.getComponents()
           .getSchemas()
           .values()
-          .forEach(
-              schema -> {
-                if (schema.getProperties() == null) return;
-                Object property = schema.getProperties().get("nextCursor");
-                if (!(property instanceof Schema<?> cursor)
-                    || !"#/components/schemas/MusicRecordListCursor".equals(cursor.get$ref()))
-                  return;
-                ComposedSchema nullable = new ComposedSchema();
-                nullable.setDescription(cursor.getDescription());
-                nullable.addAnyOfItem(new Schema<>().$ref(cursor.get$ref()));
-                Schema<?> nullSchema = new Schema<>();
-                nullSchema.setTypes(Set.of("null"));
-                nullable.addAnyOfItem(nullSchema);
-                schema.getProperties().put("nextCursor", nullable);
-              });
+          .forEach(MusicRecordListOpenApiConfig::makeCursorNullable);
     };
+  }
+
+  private static void makeCursorNullable(Schema<?> schema) {
+    if (schema.getProperties() == null) return;
+    Object property = schema.getProperties().get("nextCursor");
+    if (!(property instanceof Schema<?> cursor)
+        || !"#/components/schemas/MusicRecordListCursor".equals(cursor.get$ref())) return;
+    ComposedSchema nullable = new ComposedSchema();
+    nullable.setDescription(cursor.getDescription());
+    nullable.addAnyOfItem(new Schema<>().$ref(cursor.get$ref()));
+    Schema<?> nullSchema = new Schema<>();
+    nullSchema.setTypes(Set.of("null"));
+    nullable.addAnyOfItem(nullSchema);
+    schema.getProperties().put("nextCursor", nullable);
   }
 }

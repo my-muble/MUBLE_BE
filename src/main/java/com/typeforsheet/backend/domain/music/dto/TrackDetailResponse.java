@@ -27,17 +27,21 @@ public record TrackDetailResponse(
         String artistId,
     @Schema(description = "Recording 재생시간(밀리초)", example = "253000", nullable = true)
         Long durationMs,
-    @Schema(description = "선정된 대표 Release의 제목", example = "Palette", nullable = true)
+    @Schema(
+            description = "albumId 미지정 시 대표 Release 제목, 지정 시 해당 Release Group 제목",
+            example = "Palette",
+            nullable = true)
         String albumTitle,
     @Schema(
-            description = "대표 앨범의 MusicBrainz Release Group MBID",
+            description = "선택된 앨범의 MusicBrainz Release Group MBID",
             example = "a1234567-1234-1234-1234-123456789abc",
             nullable = true)
         String releaseGroupId,
     @Schema(description = "커버 URL. 앨범이 없거나 비활성·없음·조회 실패 시 null", nullable = true)
         String coverImageUrl,
     @Schema(
-            description = "대표 Release 발매일. 연도 또는 연월만 제공될 수 있음",
+            description =
+                "albumId 미지정 시 대표 Release 발매일, 지정 시 Release Group 최초 발매일. 연도 또는 연월만 제공될 수 있음",
             example = "2017-04-21",
             nullable = true)
         String releaseDate) {}

@@ -185,6 +185,8 @@ public class RecordController {
       description =
           """
       유효한 Access Token이 필요합니다. 공개 기록은 로그인한 사용자에게 공개되며 비공개 기록은 작성자만 조회할 수 있습니다.
+      작성자 닉네임은 조회자가 아닌 기록 작성자의 값이며 없으면 null입니다. 프로필 이미지 URL은 현재 항상 null입니다.
+      타인 목록에서는 별점 전용 기록을 제외하지만 공개 별점 전용 기록도 ID로 직접 상세 조회할 수 있습니다. 타인의 비공개·삭제된·없는 기록은 404입니다.
       외부 음악 조회 장애 시 음악 ID와 타입 및 기록은 유지하고 제목, 아티스트, 커버는 null로 반환합니다.
       """)
   @ApiResponses({
@@ -195,7 +197,15 @@ public class RecordController {
             @Content(
                 mediaType = "application/json",
                 schema = @Schema(implementation = RecordSuccessSchemas.Detail.class),
-                examples = @ExampleObject(name = "외부 메타데이터 없음", value = RecordApiExamples.DETAIL))),
+                examples = {
+                  @ExampleObject(name = "본인 공개", value = RecordApiExamples.DETAIL_OWNER_PUBLIC),
+                  @ExampleObject(name = "본인 비공개", value = RecordApiExamples.DETAIL_OWNER_PRIVATE),
+                  @ExampleObject(name = "타인 별점 전용", value = RecordApiExamples.DETAIL_OTHER_RATING),
+                  @ExampleObject(
+                      name = "타인 본문 전용 닉네임 없음",
+                      value = RecordApiExamples.DETAIL_OTHER_TEXT),
+                  @ExampleObject(name = "외부 메타데이터 없음", value = RecordApiExamples.DETAIL)
+                })),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
         description = "INVALID_REQUEST: 잘못된 기록 ID",
