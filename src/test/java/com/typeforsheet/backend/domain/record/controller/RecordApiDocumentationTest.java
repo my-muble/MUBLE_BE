@@ -123,11 +123,33 @@ class RecordApiDocumentationTest {
         .properties()
         .forEach(
             entry -> {
-              JsonNode data = entry.getValue().path("value").path("data");
+              JsonNode example = entry.getValue().path("value");
+              assertEquals("음악 기록 조회에 성공했습니다.", example.path("message").asText());
+              assertFalse(example.toString().contains("??"));
+              JsonNode data = example.path("data");
               assertTrue(data.has("authorNickname"));
               assertTrue(data.has("authorProfileImageUrl"));
               assertTrue(data.path("authorProfileImageUrl").isNull());
             });
+    assertEquals(
+        "뮤블사용자",
+        detailExamples.path("본인 공개").path("value").path("data").path("authorNickname").asText());
+    assertEquals(
+        "앨범을 다시 듣고 싶어요.",
+        detailExamples.path("본인 공개").path("value").path("data").path("content").asText());
+    assertEquals(
+        "나만 간직할 감상입니다.",
+        detailExamples.path("본인 비공개").path("value").path("data").path("content").asText());
+    assertTrue(
+        detailExamples
+            .path("타인 본문 전용 닉네임 없음")
+            .path("value")
+            .path("data")
+            .path("authorNickname")
+            .isNull());
+    assertEquals(
+        "가사가 아닌 감상평 예시입니다.",
+        detailExamples.path("타인 본문 전용 닉네임 없음").path("value").path("data").path("content").asText());
     assertTrue(schemas.path("CreateRecordRequest").path("properties").has("isPrivate"));
     JsonNode patchProperties = schemas.path("UpdateRecordRequest").path("properties");
     assertTrue(patchProperties.has("rating"));

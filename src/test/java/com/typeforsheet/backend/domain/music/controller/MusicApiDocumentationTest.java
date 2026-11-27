@@ -78,7 +78,9 @@ class MusicApiDocumentationTest {
         .properties()
         .forEach(
             entry -> {
-              JsonNode data = entry.getValue().path("value").path("data");
+              JsonNode example = entry.getValue().path("value");
+              assertEquals("앨범 상세 조회에 성공했습니다.", example.path("message").asText());
+              JsonNode data = example.path("data");
               JsonNode count = data.path("trackCount"), total = data.path("totalDurationMs");
               if (!count.isNull()) assertEquals(count.asInt(), data.path("tracks").size());
               if (!total.isNull()) {
@@ -87,15 +89,29 @@ class MusicApiDocumentationTest {
                 assertEquals(sum, total.asLong());
               }
             });
-    assertEquals(
-        3,
+    JsonNode trackExamples =
         operation
             .path("responses")
             .path("200")
             .path("content")
             .path("application/json")
-            .path("examples")
-            .size());
+            .path("examples");
+    assertEquals(3, trackExamples.size());
+    trackExamples
+        .properties()
+        .forEach(
+            entry -> {
+              JsonNode example = entry.getValue().path("value");
+              assertEquals("곡 상세 조회에 성공했습니다.", example.path("message").asText());
+              assertEquals("밤편지", example.path("data").path("title").asText());
+              assertFalse(example.toString().contains("??"));
+            });
+    assertEquals(
+        "Palette A",
+        trackExamples.path("지정 앨범 A").path("value").path("data").path("albumTitle").asText());
+    assertEquals(
+        "Palette B",
+        trackExamples.path("지정 앨범 B 커버 없음").path("value").path("data").path("albumTitle").asText());
   }
 
   @Test
