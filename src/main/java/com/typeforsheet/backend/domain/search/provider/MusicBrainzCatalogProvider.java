@@ -338,6 +338,10 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       String releaseDate) {}
 
   public TrackDetail getTrackDetail(String id) {
+    return getTrackDetail(id, null);
+  }
+
+  public TrackDetail getTrackDetail(String id, String albumGroupId) {
     JsonNode recording =
         requestUrl(
             baseUrl + "/ws/2/recording/" + id + "?fmt=json&inc=artist-credits",
@@ -374,6 +378,29 @@ public class MusicBrainzCatalogProvider implements MusicCatalogProvider {
       offset += size;
       if (offset >= count) break;
       if (size == 0) throw invalidData("recording_release_empty_page");
+    }
+    if (albumGroupId != null) {
+      JsonNode group =
+          requestUrl(
+              baseUrl + "/ws/2/release-group/" + albumGroupId + "?fmt=json&inc=artist-credits",
+              true,
+              response -> validUuid(value(response, "id")) && value(response, "title") != null);
+      if (group == null) throw new BusinessException(ErrorCode.MUSIC_EXTERNAL_ID_NOT_FOUND);
+      String canonicalGroupId = value(group, "id");
+      if (releases.stream()
+          .noneMatch(
+              release -> canonicalGroupId.equals(value(release.path("release-group"), "id"))))
+        throw new BusinessException(ErrorCode.INVALID_REQUEST);
+      JsonNode length = recording.path("length");
+      return new TrackDetail(
+          recordingId,
+          title,
+          artistCredit(recording),
+          firstArtistId(recording),
+          length.isIntegralNumber() ? length.asLong() : null,
+          value(group, "title"),
+          canonicalGroupId,
+          value(group, "first-release-date"));
     }
     releases.sort(Comparator.comparing(release -> value(release, "id")));
     var selected = RepresentativeReleaseSelector.select(recording, releases);

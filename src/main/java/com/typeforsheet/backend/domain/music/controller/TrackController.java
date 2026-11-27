@@ -31,6 +31,8 @@ public class TrackController {
       description =
           """
           trackId는 MusicBrainz MBID가 아닌 MUBLE 내부 TRACK ID입니다. 연결된 Recording MBID로 MusicBrainz를 조회합니다.
+          선택적 albumId는 내부 ALBUM ID이며 지정하면 해당 Release Group에 수록된 곡인지 확인하고 앨범 상세와 같은 제목, 커버, 최초 발매일을 반환합니다.
+          albumId를 생략하면 기존 대표 앨범을 반환합니다. 곡의 내부 ID와 기록 범위는 변경되지 않습니다.
           대표 앨범은 공식 발매, 아티스트 일치, 컴필레이션·라이브·리믹스 등이 아닌 유형과 Album/EP/Single에 점수를 부여하고,
           동점이면 이른 발매일과 Release MBID 순으로 선택합니다. 앨범이 없으면 albumTitle, releaseGroupId, coverImageUrl은 null입니다.
           releaseDate는 albumTitle과 동일한 대표 Release의 발매일이며 정보가 없으면 null입니다.
@@ -94,13 +96,28 @@ public class TrackController {
               required = true,
               schema = @Schema(type = "integer", format = "int64"))
           @PathVariable
-          String trackId) {
+          String trackId,
+      @Parameter(
+              description = "선택적 MUBLE 내부 앨범 ID",
+              schema = @Schema(type = "integer", format = "int64"))
+          @RequestParam(required = false)
+          String albumId) {
     Long id;
     try {
       id = Long.valueOf(trackId);
     } catch (NumberFormatException exception) {
       throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
     }
-    return ApiResponse.success("곡 상세 조회에 성공했습니다.", service.getTrack(id));
+    Long album = null;
+    if (albumId != null) {
+      try {
+        album = Long.valueOf(albumId);
+      } catch (NumberFormatException exception) {
+        throw new BusinessException(ErrorCode.INVALID_REQUEST, exception);
+      }
+      if (album <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    }
+    return ApiResponse.success(
+        "곡 상세 조회에 성공했습니다.", album == null ? service.getTrack(id) : service.getTrack(id, album));
   }
 }

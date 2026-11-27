@@ -20,7 +20,12 @@ public class TrackDetailService {
   private final AlbumArtworkProvider artwork;
 
   public TrackDetailResponse getTrack(Long trackId) {
+    return getTrack(trackId, null);
+  }
+
+  public TrackDetailResponse getTrack(Long trackId, Long albumId) {
     if (trackId == null || trackId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    if (albumId != null && albumId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
     MusicItem item =
         items
             .findById(trackId)
@@ -32,7 +37,22 @@ public class TrackDetailService {
                 item.getId(), MusicProvider.MUSICBRAINZ, ExternalIdType.RECORDING)
             .map(MusicExternalId::getExternalId)
             .orElseThrow(() -> new BusinessException(ErrorCode.MUSIC_MAPPING_MISSING));
-    var track = catalog.getTrackDetail(mbid);
+    String albumMbid = null;
+    if (albumId != null) {
+      MusicItem album =
+          items
+              .findById(albumId)
+              .filter(value -> value.getType() == MusicType.ALBUM)
+              .orElseThrow(() -> new BusinessException(ErrorCode.ALBUM_NOT_FOUND));
+      albumMbid =
+          externalIds
+              .findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+                  album.getId(), MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP)
+              .map(MusicExternalId::getExternalId)
+              .orElseThrow(() -> new BusinessException(ErrorCode.MUSIC_MAPPING_MISSING));
+    }
+    var track =
+        albumId == null ? catalog.getTrackDetail(mbid) : catalog.getTrackDetail(mbid, albumMbid);
     String cover = null;
     if (track.releaseGroupId() != null) {
       try {

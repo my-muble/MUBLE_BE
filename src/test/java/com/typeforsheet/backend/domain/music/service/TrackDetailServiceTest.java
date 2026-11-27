@@ -20,6 +20,61 @@ class TrackDetailServiceTest {
   private static final String GROUP = "b1234567-1234-1234-1234-123456789abc";
 
   @Test
+  void returnsRequestedAlbumAndRejectsInvalidAlbum() {
+    setupTrack();
+    var album = mock(MusicItem.class);
+    when(album.getId()).thenReturn(2L);
+    when(album.getType()).thenReturn(MusicType.ALBUM);
+    when(items.findById(2L)).thenReturn(Optional.of(album));
+    var mapping = mock(MusicExternalId.class);
+    when(mapping.getExternalId()).thenReturn(GROUP);
+    when(ids.findFirstByMusicItem_IdAndProviderAndExternalIdTypeOrderByIdAsc(
+            2L, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP))
+        .thenReturn(Optional.of(mapping));
+    when(catalog.getTrackDetail(ID, GROUP))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.TrackDetail(
+                ID, "Track", "Artist", "artist", 1234L, "Requested", GROUP, "2001"));
+    when(artwork.findCoverUrl(GROUP)).thenReturn("cover");
+    var result = service.getTrack(1L, 2L);
+    when(catalog.getAlbumDetail(GROUP))
+        .thenReturn(
+            new MusicBrainzCatalogProvider.AlbumDetail(
+                GROUP,
+                "Requested",
+                "Artist",
+                "artist",
+                "2001",
+                "Album",
+                java.util.List.of(),
+                true));
+    var albumResult = new AlbumDetailService(items, ids, catalog, artwork).getAlbum(2L);
+    assertEquals("Requested", result.albumTitle());
+    assertEquals("2001", result.releaseDate());
+    assertEquals("cover", result.coverImageUrl());
+    assertEquals(1L, result.trackId());
+    assertEquals(albumResult.title(), result.albumTitle());
+    assertEquals(albumResult.releaseDate(), result.releaseDate());
+    assertEquals(albumResult.coverImageUrl(), result.coverImageUrl());
+    when(artwork.findCoverUrl(GROUP)).thenThrow(new IllegalStateException());
+    assertNull(service.getTrack(1L, 2L).coverImageUrl());
+    when(catalog.getTrackDetail(ID, GROUP))
+        .thenThrow(new BusinessException(ErrorCode.INVALID_REQUEST));
+    assertEquals(
+        ErrorCode.INVALID_REQUEST,
+        assertThrows(BusinessException.class, () -> service.getTrack(1L, 2L)).getErrorCode());
+    verify(catalog, never()).getTrackDetail(ID);
+    assertEquals(
+        ErrorCode.INVALID_REQUEST,
+        assertThrows(BusinessException.class, () -> service.getTrack(1L, 0L)).getErrorCode());
+    assertEquals(
+        ErrorCode.ALBUM_NOT_FOUND,
+        assertThrows(BusinessException.class, () -> service.getTrack(1L, 3L)).getErrorCode());
+    verify(items, never()).save(any());
+    verify(ids, never()).save(any());
+  }
+
+  @Test
   void returnsTrackAndHandlesMissingArtwork() {
     setupTrack();
     when(catalog.getTrackDetail(ID))
