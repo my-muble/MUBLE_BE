@@ -214,6 +214,11 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.totalRecordCount").value(1))
         .andExpect(jsonPath("$.data.albumRecords").isEmpty())
         .andExpect(jsonPath("$.data.tracks[0].recordCount").value(1));
+    mvc.perform(get("/api/archive/albums/group-c/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.totalRecordCount").value(1))
+        .andExpect(jsonPath("$.data.albumRecordCount").value(0))
+        .andExpect(jsonPath("$.data.albumRecords").isEmpty());
   }
 
   @Test
@@ -423,6 +428,14 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.tracks[1].trackId").value(trackA.getId()))
         .andExpect(jsonPath("$.data.tracks[1].recordCount").value(2));
 
+    mvc.perform(get(path + "/group-a/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.totalRecordCount").value(6))
+        .andExpect(jsonPath("$.data.albumRecords.length()").value(4))
+        .andExpect(jsonPath("$.data.albumRecords[3].rating").value(4.0));
+    mvc.perform(get(path + "/unknown/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ALBUM_NOT_FOUND"));
   }
 
   private void mapAlbum(MusicItem album, String group) {

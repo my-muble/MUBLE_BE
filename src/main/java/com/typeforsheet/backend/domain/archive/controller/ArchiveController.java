@@ -2,6 +2,7 @@ package com.typeforsheet.backend.domain.archive.controller;
 
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumRecordsResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
@@ -81,6 +82,23 @@ public class ArchiveController {
     return ApiResponse.success(
         "누적 앨범 기록 상세 조회에 성공했습니다.",
         archiveTimelineService.getAlbumDetail(Long.valueOf(jwt.getSubject()), albumKey));
+  }
+
+  @GetMapping("/albums/{albumKey}/records")
+  @Operation(
+      summary = "누적 앨범 자체 기록 전체보기",
+      description =
+          """
+          해당 앨범에 직접 작성한 본인 기록 전체를 최초 작성 시각 최신순으로 반환합니다.
+          수록곡 기록은 상단 누적 합계에 포함되며, 목록에는 앨범 자체 기록만 담깁니다.
+          수록곡 기록만 있는 앨범은 빈 목록을 반환합니다.
+          """)
+  public ApiResponse<ArchiveAlbumRecordsResponse> getAlbumRecords(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "앨범순 아카이브 목록에서 반환한 albumKey") @PathVariable String albumKey) {
+    return ApiResponse.success(
+        "누적 앨범 자체 기록 전체 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumRecords(Long.valueOf(jwt.getSubject()), albumKey));
   }
 
   @GetMapping("/timeline")

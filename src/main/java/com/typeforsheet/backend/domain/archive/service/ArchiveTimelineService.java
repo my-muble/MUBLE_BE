@@ -3,6 +3,7 @@ package com.typeforsheet.backend.domain.archive.service;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse.AlbumCard;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumRecordsResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Album;
@@ -189,6 +190,18 @@ public class ArchiveTimelineService {
         records.trackRecordCount(),
         records.albumRecords().stream().limit(ALBUM_RECORD_PREVIEW_SIZE).toList(),
         tracksFor(records));
+  }
+
+  @Transactional
+  public ArchiveAlbumRecordsResponse getAlbumRecords(Long userId, String albumKey) {
+    requireUser(userId);
+    AlbumRecords records =
+        collectAlbumRecords(archiveRepository.findAllDetailRows(userId), albumKey);
+    return new ArchiveAlbumRecordsResponse(
+        records.album(),
+        records.totalRecordCount(),
+        records.albumRecords().size(),
+        records.albumRecords());
   }
 
   private AlbumRecords collectAlbumRecords(List<ArchiveRecordRow> rows, String albumKey) {
