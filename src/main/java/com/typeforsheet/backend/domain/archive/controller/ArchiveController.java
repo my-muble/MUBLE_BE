@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.archive.controller;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
@@ -62,6 +63,24 @@ public class ArchiveController {
         "앨범순 아카이브 조회에 성공했습니다.",
         archiveTimelineService.getAlbums(
             Long.valueOf(jwt.getSubject()), ArchiveAlbumSort.parse(sort)));
+  }
+
+  @GetMapping("/albums/{albumKey}")
+  @Operation(
+      summary = "누적 앨범 기록 상세 조회",
+      description =
+          """
+          앨범순 목록의 albumKey로 해당 앨범과 수록곡의 전체 기간 본인 기록을 집계합니다.
+          공개·비공개 기록을 모두 포함하며 앨범 자체 기록은 작성 시각 최신순으로 최대 3건을 반환합니다.
+          수록곡 목록은 앨범 순서대로 반환하며 기록이 없는 곡도 포함합니다.
+          해당 그룹에 본인 기록이 없으면 404 ALBUM_NOT_FOUND입니다.
+          """)
+  public ApiResponse<ArchiveAlbumDetailResponse> getAlbumDetail(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "앨범순 아카이브 목록에서 반환한 albumKey") @PathVariable String albumKey) {
+    return ApiResponse.success(
+        "누적 앨범 기록 상세 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumDetail(Long.valueOf(jwt.getSubject()), albumKey));
   }
 
   @GetMapping("/timeline")

@@ -1,5 +1,6 @@
 package com.typeforsheet.backend.domain.archive.service;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse.AlbumCard;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
@@ -59,6 +60,7 @@ public class ArchiveTimelineService {
   private static final Logger log = LoggerFactory.getLogger(ArchiveTimelineService.class);
   private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
   private static final int MAX_COVERS_PER_DAY = 5;
+  private static final int ALBUM_RECORD_PREVIEW_SIZE = 3;
 
   private final ArchiveRepository archiveRepository;
   private final UserRepository userRepository;
@@ -164,13 +166,39 @@ public class ArchiveTimelineService {
 
   @Transactional
   public ArchiveDayAlbumResponse getDayAlbum(Long userId, LocalDate date, String albumKey) {
+    AlbumRecords records = collectAlbumRecords(dayRows(userId, date), albumKey);
+    return new ArchiveDayAlbumResponse(
+        date,
+        records.album(),
+        records.totalRecordCount(),
+        records.albumRecords().size(),
+        records.trackRecordCount(),
+        records.albumRecords(),
+        tracksFor(records));
+  }
+
+  @Transactional
+  public ArchiveAlbumDetailResponse getAlbumDetail(Long userId, String albumKey) {
+    requireUser(userId);
+    AlbumRecords records =
+        collectAlbumRecords(archiveRepository.findAllDetailRows(userId), albumKey);
+    return new ArchiveAlbumDetailResponse(
+        records.album(),
+        records.totalRecordCount(),
+        records.albumRecords().size(),
+        records.trackRecordCount(),
+        records.albumRecords().stream().limit(ALBUM_RECORD_PREVIEW_SIZE).toList(),
+        tracksFor(records));
+  }
+
+  private AlbumRecords collectAlbumRecords(List<ArchiveRecordRow> rows, String albumKey) {
     List<AlbumRecord> albumRecords = new ArrayList<>();
     Map<String, TrackCounter> recordedTracks = new LinkedHashMap<>();
     Map<Long, AlbumMetadata> metadataCache = new LinkedHashMap<>();
     AlbumMetadata selected = null;
     long trackCount = 0;
 
-    for (ArchiveRecordRow row : dayRows(userId, date)) {
+    for (ArchiveRecordRow row : rows) {
       AlbumMetadata metadata =
           metadataCache.computeIfAbsent(
               row.musicItemId(),
@@ -205,9 +233,14 @@ public class ArchiveTimelineService {
     if (selected == null) {
       throw new BusinessException(ErrorCode.ALBUM_NOT_FOUND);
     }
-    selected = enrichTrackAlbum(selected);
+    return new AlbumRecords(
+        enrichTrackAlbum(selected), List.copyOf(albumRecords), trackCount, recordedTracks);
+  }
+
+  private List<Track> tracksFor(AlbumRecords albumRecords) {
+    Map<String, TrackCounter> recordedTracks = new LinkedHashMap<>(albumRecords.recordedTracks());
     List<Track> tracks = new ArrayList<>();
-    for (AlbumTrack track : selected.tracks()) {
+    for (AlbumTrack track : albumRecords.metadata().tracks()) {
       TrackCounter records = recordedTracks.remove(track.recordingId());
       tracks.add(
           new Track(
@@ -223,19 +256,27 @@ public class ArchiveTimelineService {
           new Track(
               records.trackId, records.recordingId, null, null, records.title, records.count));
     }
-    return new ArchiveDayAlbumResponse(
-        date,
-        new Album(
-            selected.albumKey(),
-            selected.albumId(),
-            selected.title(),
-            selected.artistName(),
-            selected.coverImageUrl()),
-        albumRecords.size() + trackCount,
-        albumRecords.size(),
-        trackCount,
-        List.copyOf(albumRecords),
-        List.copyOf(tracks));
+    return List.copyOf(tracks);
+  }
+
+  private record AlbumRecords(
+      AlbumMetadata metadata,
+      List<AlbumRecord> albumRecords,
+      long trackRecordCount,
+      Map<String, TrackCounter> recordedTracks) {
+
+    private long totalRecordCount() {
+      return albumRecords.size() + trackRecordCount;
+    }
+
+    private Album album() {
+      return new Album(
+          metadata.albumKey(),
+          metadata.albumId(),
+          metadata.title(),
+          metadata.artistName(),
+          metadata.coverImageUrl());
+    }
   }
 
   private List<ArchiveRecordRow> dayRows(Long userId, LocalDate date) {

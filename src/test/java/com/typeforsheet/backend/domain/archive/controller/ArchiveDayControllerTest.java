@@ -346,6 +346,7 @@ class ArchiveDayControllerTest {
     save(owner, trackA, (byte) 10, null, true, START);
     save(owner, albumB, null, "latest album", false, START.plusDays(1));
     save(other, albumB, (byte) 2, null, false, START.plusDays(2));
+    save(other, albumA, (byte) 2, null, false, START.plusDays(3));
 
     when(albums.getAlbum(albumA.getId()))
         .thenReturn(
@@ -358,7 +359,9 @@ class ArchiveDayControllerTest {
                 null,
                 null,
                 "cover-a",
-                List.of()));
+                List.of(
+                    new AlbumTrack(1, "1", "No records", null, null, "track-zero"),
+                    new AlbumTrack(1, "2", "Track A", null, null, "track-a"))));
     when(albums.getAlbum(albumB.getId()))
         .thenReturn(
             new AlbumDetailResponse(
@@ -401,6 +404,25 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.albums[0].coverImageUrl").value("cover-a"))
         .andExpect(jsonPath("$.data.albums[0].recordCount").value(3))
         .andExpect(jsonPath("$.data.albums[1].recordCount").value(1));
+
+    save(owner, albumA, null, "old comment", false, START.minusDays(3));
+    save(owner, albumA, (byte) 6, null, true, START.minusDays(2));
+    save(owner, albumA, null, "latest comment", true, START.plusDays(1));
+
+    mvc.perform(get(path + "/group-a")).andExpect(status().isUnauthorized());
+    mvc.perform(get(path + "/group-a").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.album.albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.totalRecordCount").value(6))
+        .andExpect(jsonPath("$.data.albumRecordCount").value(4))
+        .andExpect(jsonPath("$.data.trackRecordCount").value(2))
+        .andExpect(jsonPath("$.data.albumRecords.length()").value(3))
+        .andExpect(jsonPath("$.data.albumRecords[0].content").value("latest comment"))
+        .andExpect(jsonPath("$.data.albumRecords[1].rating").value(3.0))
+        .andExpect(jsonPath("$.data.tracks[0].recordCount").value(0))
+        .andExpect(jsonPath("$.data.tracks[1].trackId").value(trackA.getId()))
+        .andExpect(jsonPath("$.data.tracks[1].recordCount").value(2));
+
   }
 
   private void mapAlbum(MusicItem album, String group) {
