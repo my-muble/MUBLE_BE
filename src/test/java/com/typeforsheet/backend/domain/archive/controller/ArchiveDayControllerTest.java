@@ -331,6 +331,78 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.albumKey").value("stable-group"));
   }
 
+  @Test
+  void returnsAllTimeAlbumArchiveWithTrackRecordsGroupedIntoTheirAlbum() throws Exception {
+    User owner = users.saveAndFlush(new User("album-archive-owner"));
+    User other = users.saveAndFlush(new User("album-archive-other"));
+    MusicItem albumA = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem albumB = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem trackA = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    mapAlbum(albumA, "group-a");
+    mapAlbum(albumB, "group-b");
+
+    save(owner, albumA, (byte) 8, null, true, START.minusYears(1));
+    save(owner, trackA, null, "track note", false, START.minusDays(1));
+    save(owner, trackA, (byte) 10, null, true, START);
+    save(owner, albumB, null, "latest album", false, START.plusDays(1));
+    save(other, albumB, (byte) 2, null, false, START.plusDays(2));
+
+    when(albums.getAlbum(albumA.getId()))
+        .thenReturn(
+            new AlbumDetailResponse(
+                albumA.getId(),
+                new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "group-a"),
+                "Album A",
+                "Artist A",
+                null,
+                null,
+                null,
+                "cover-a",
+                List.of()));
+    when(albums.getAlbum(albumB.getId()))
+        .thenReturn(
+            new AlbumDetailResponse(
+                albumB.getId(),
+                new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "group-b"),
+                "Album B",
+                "Artist B",
+                null,
+                null,
+                null,
+                "cover-b",
+                List.of()));
+    when(tracks.getTrack(trackA.getId()))
+        .thenReturn(
+            new TrackDetailResponse(
+                trackA.getId(),
+                new ExternalReference("MUSICBRAINZ", "RECORDING", "track-a"),
+                "Track A",
+                "Artist A",
+                null,
+                null,
+                "Album A",
+                "group-a",
+                "cover-a",
+                null));
+
+    String path = "/api/archive/albums";
+    mvc.perform(get(path).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albumCount").value(2))
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("group-b"))
+        .andExpect(jsonPath("$.data.albums[1].albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.albums[1].recordCount").value(3));
+
+    mvc.perform(get(path).param("sort", "MOST_RECORDED").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.albums[0].albumId").value(albumA.getId()))
+        .andExpect(jsonPath("$.data.albums[0].artistName").value("Artist A"))
+        .andExpect(jsonPath("$.data.albums[0].coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.albums[0].recordCount").value(3))
+        .andExpect(jsonPath("$.data.albums[1].recordCount").value(1));
+  }
+
   private void mapAlbum(MusicItem album, String group) {
     externalIds.saveAndFlush(
         new MusicExternalId(album, MusicProvider.MUSICBRAINZ, ExternalIdType.RELEASE_GROUP, group));

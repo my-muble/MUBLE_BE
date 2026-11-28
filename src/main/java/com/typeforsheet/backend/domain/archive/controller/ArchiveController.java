@@ -1,5 +1,7 @@
 package com.typeforsheet.backend.domain.archive.controller;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse;
@@ -35,6 +37,32 @@ public class ArchiveController {
 
   private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
   private final ArchiveTimelineService archiveTimelineService;
+
+  @GetMapping("/albums")
+  @Operation(
+      summary = "앨범순 아카이브 조회",
+      description =
+          """
+          본인의 전체 기간 기록을 MusicBrainz Release Group 기준의 고유 앨범으로 묶어 조회합니다.
+          앨범 자체 기록과 수록곡 기록을 함께 합산하며 공개 여부와 별점·본문 입력 여부에 관계없이 포함합니다.
+          LATEST는 최근 작성 시각 내림차순, MOST_RECORDED는 누적 기록 수 내림차순입니다.
+          동률이면 최근 작성 시각, 앨범명 오름차순으로 정렬합니다.
+          """)
+  public ApiResponse<ArchiveAlbumListResponse> getAlbums(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(
+              description = "정렬 기준. LATEST(최신순, 기본값) 또는 MOST_RECORDED(기록 많은 순)",
+              schema =
+                  @Schema(
+                      type = "string",
+                      allowableValues = {"LATEST", "MOST_RECORDED"}))
+          @RequestParam(required = false)
+          String sort) {
+    return ApiResponse.success(
+        "앨범순 아카이브 조회에 성공했습니다.",
+        archiveTimelineService.getAlbums(
+            Long.valueOf(jwt.getSubject()), ArchiveAlbumSort.parse(sort)));
+  }
 
   @GetMapping("/timeline")
   @Operation(

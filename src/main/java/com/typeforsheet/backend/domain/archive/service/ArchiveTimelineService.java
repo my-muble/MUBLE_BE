@@ -1,5 +1,8 @@
 package com.typeforsheet.backend.domain.archive.service;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse.AlbumCard;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Album;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.AlbumRecord;
@@ -38,6 +41,7 @@ import java.time.Year;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +67,40 @@ public class ArchiveTimelineService {
   private final MusicExternalIdRepository externalIds;
   private final MusicBrainzCatalogProvider catalog;
   private final ArchiveTrackAlbumRepository trackAlbums;
+
+  @Transactional
+  public ArchiveAlbumListResponse getAlbums(Long userId, ArchiveAlbumSort sort) {
+    requireUser(userId);
+    if (sort == null) {
+      throw new BusinessException(ErrorCode.INVALID_REQUEST);
+    }
+
+    Map<Long, AlbumMetadata> metadataCache = new LinkedHashMap<>();
+    Map<String, AlbumListAccumulator> grouped = new LinkedHashMap<>();
+    for (ArchiveRecordRow row : archiveRepository.findAlbumRows(userId)) {
+      AlbumMetadata metadata =
+          metadataCache.computeIfAbsent(
+              row.musicItemId(),
+              ignored -> resolveAlbumMetadata(row.musicItemId(), row.musicType()));
+      grouped
+          .computeIfAbsent(metadata.albumKey(), ignored -> new AlbumListAccumulator(metadata))
+          .add(row, metadata);
+    }
+
+    Comparator<AlbumListAccumulator> comparator =
+        sort == ArchiveAlbumSort.MOST_RECORDED
+            ? Comparator.comparingLong(AlbumListAccumulator::recordCount)
+                .reversed()
+                .thenComparing(AlbumListAccumulator::latestCreatedAt, Comparator.reverseOrder())
+                .thenComparing(AlbumListAccumulator::titleForSort)
+                .thenComparing(AlbumListAccumulator::albumKey)
+            : Comparator.comparing(AlbumListAccumulator::latestCreatedAt, Comparator.reverseOrder())
+                .thenComparing(AlbumListAccumulator::titleForSort)
+                .thenComparing(AlbumListAccumulator::albumKey);
+    List<AlbumCard> albums =
+        grouped.values().stream().sorted(comparator).map(AlbumListAccumulator::toResponse).toList();
+    return new ArchiveAlbumListResponse(albums.size(), albums);
+  }
 
   @Transactional
   public ArchiveTimelineResponse getTimeline(Long userId, int year) {
@@ -488,6 +526,50 @@ public class ArchiveTimelineService {
           .limit(MAX_COVERS_PER_DAY)
           .forEach(entry -> covers.add(new AlbumCover(entry.getKey(), entry.getValue())));
       return new DaySummary(date, recordCount, albums.size(), List.copyOf(covers));
+    }
+  }
+
+  private static final class AlbumListAccumulator {
+    private AlbumMetadata metadata;
+    private long recordCount;
+    private LocalDateTime latestCreatedAt;
+
+    private AlbumListAccumulator(AlbumMetadata metadata) {
+      this.metadata = metadata;
+    }
+
+    private void add(ArchiveRecordRow row, AlbumMetadata candidate) {
+      recordCount++;
+      if (latestCreatedAt == null || row.createdAt().isAfter(latestCreatedAt)) {
+        latestCreatedAt = row.createdAt();
+      }
+      metadata = mergeAlbumMetadata(metadata, candidate);
+    }
+
+    private long recordCount() {
+      return recordCount;
+    }
+
+    private LocalDateTime latestCreatedAt() {
+      return latestCreatedAt;
+    }
+
+    private String titleForSort() {
+      return metadata.title() == null ? "\uffff" : metadata.title();
+    }
+
+    private String albumKey() {
+      return metadata.albumKey();
+    }
+
+    private AlbumCard toResponse() {
+      return new AlbumCard(
+          metadata.albumKey(),
+          metadata.albumId(),
+          metadata.title(),
+          metadata.artistName(),
+          metadata.coverImageUrl(),
+          recordCount);
     }
   }
 }
