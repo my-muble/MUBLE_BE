@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRecordRow;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveRepository;
 import com.typeforsheet.backend.domain.archive.repository.ArchiveTrackAlbumRepository;
@@ -116,6 +117,60 @@ class ArchiveTimelineServiceTest {
     assertTrue(response.months().isEmpty());
   }
 
+  @Test
+  void groupsAlbumAndTrackRecordsByReleaseGroupAndSortsByLatestRecord() {
+    LocalDateTime now = LocalDateTime.of(2026, 11, 28, 12, 0);
+    when(archives.findAlbumRows(1L))
+        .thenReturn(
+            List.of(
+                row(4L, 21L, MusicType.TRACK, now),
+                row(3L, 11L, MusicType.ALBUM, now.minusHours(1)),
+                row(2L, 21L, MusicType.TRACK, now.minusHours(2)),
+                row(1L, 12L, MusicType.ALBUM, now.minusDays(1))));
+    when(tracks.getTrack(21L)).thenReturn(track(21L, "rg-1", "track-cover"));
+    when(trackAlbums.find(21L)).thenReturn(Optional.of(new TrackAlbum("rg-1")));
+    when(albums.getAlbum(11L)).thenReturn(namedAlbum(11L, "rg-1", "Album A", "Artist A"));
+    when(albums.getAlbum(12L)).thenReturn(namedAlbum(12L, "rg-2", "Album B", "Artist B"));
+    mapAlbum(11L, "rg-1");
+    mapAlbum(12L, "rg-2");
+
+    var response = service.getAlbums(1L, ArchiveAlbumSort.LATEST);
+
+    assertEquals(2, response.albumCount());
+    assertEquals(
+        List.of("rg-1", "rg-2"), response.albums().stream().map(a -> a.albumKey()).toList());
+    assertEquals(3, response.albums().getFirst().recordCount());
+    assertEquals(11L, response.albums().getFirst().albumId());
+    assertEquals("Artist A", response.albums().getFirst().artistName());
+  }
+
+  @Test
+  void sortsByRecordCountThenLatestRecordAndAlbumTitle() {
+    LocalDateTime now = LocalDateTime.of(2026, 11, 28, 12, 0);
+    when(archives.findAlbumRows(1L))
+        .thenReturn(
+            List.of(
+                row(5L, 13L, MusicType.ALBUM, now),
+                row(4L, 12L, MusicType.ALBUM, now.minusHours(1)),
+                row(3L, 11L, MusicType.ALBUM, now.minusHours(1)),
+                row(2L, 12L, MusicType.ALBUM, now.minusHours(2)),
+                row(1L, 11L, MusicType.ALBUM, now.minusHours(2))));
+    when(albums.getAlbum(11L)).thenReturn(namedAlbum(11L, "rg-1", "Alpha", "Artist"));
+    when(albums.getAlbum(12L)).thenReturn(namedAlbum(12L, "rg-2", "Beta", "Artist"));
+    when(albums.getAlbum(13L)).thenReturn(namedAlbum(13L, "rg-3", "Gamma", "Artist"));
+    mapAlbum(11L, "rg-1");
+    mapAlbum(12L, "rg-2");
+    mapAlbum(13L, "rg-3");
+
+    var response = service.getAlbums(1L, ArchiveAlbumSort.MOST_RECORDED);
+
+    assertEquals(
+        List.of("rg-1", "rg-2", "rg-3"),
+        response.albums().stream().map(a -> a.albumKey()).toList());
+    assertEquals(
+        List.of(2L, 2L, 1L), response.albums().stream().map(a -> a.recordCount()).toList());
+  }
+
   private ArchiveRecordRow row(Long recordId, Long musicId, MusicType type, LocalDateTime time) {
     return new ArchiveRecordRow(recordId, musicId, type, time);
   }
@@ -133,6 +188,20 @@ class ArchiveTimelineServiceTest {
         List.of(),
         null,
         null);
+  }
+
+  private AlbumDetailResponse namedAlbum(
+      Long id, String releaseGroupId, String title, String artist) {
+    return new AlbumDetailResponse(
+        id,
+        new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", releaseGroupId),
+        title,
+        artist,
+        null,
+        null,
+        null,
+        "cover-" + releaseGroupId,
+        List.of());
   }
 
   private TrackDetailResponse track(Long id, String releaseGroupId, String cover) {

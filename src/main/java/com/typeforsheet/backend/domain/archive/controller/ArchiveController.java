@@ -1,5 +1,10 @@
 package com.typeforsheet.backend.domain.archive.controller;
 
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumRecordsResponse;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumTrackResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse;
@@ -35,6 +40,87 @@ public class ArchiveController {
 
   private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
   private final ArchiveTimelineService archiveTimelineService;
+
+  @GetMapping("/albums")
+  @Operation(
+      summary = "앨범순 아카이브 조회",
+      description =
+          """
+          본인의 전체 기간 기록을 MusicBrainz Release Group 기준의 고유 앨범으로 묶어 조회합니다.
+          앨범 자체 기록과 수록곡 기록을 함께 합산하며 공개 여부와 별점·본문 입력 여부에 관계없이 포함합니다.
+          LATEST는 최근 작성 시각 내림차순, MOST_RECORDED는 누적 기록 수 내림차순입니다.
+          동률이면 최근 작성 시각, 앨범명 오름차순으로 정렬합니다.
+          """)
+  public ApiResponse<ArchiveAlbumListResponse> getAlbums(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(
+              description = "정렬 기준. LATEST(최신순, 기본값) 또는 MOST_RECORDED(기록 많은 순)",
+              schema =
+                  @Schema(
+                      type = "string",
+                      allowableValues = {"LATEST", "MOST_RECORDED"}))
+          @RequestParam(required = false)
+          String sort) {
+    return ApiResponse.success(
+        "앨범순 아카이브 조회에 성공했습니다.",
+        archiveTimelineService.getAlbums(
+            Long.valueOf(jwt.getSubject()), ArchiveAlbumSort.parse(sort)));
+  }
+
+  @GetMapping("/albums/{albumKey}")
+  @Operation(
+      summary = "누적 앨범 기록 상세 조회",
+      description =
+          """
+          앨범순 목록의 albumKey로 해당 앨범과 수록곡의 전체 기간 본인 기록을 집계합니다.
+          공개·비공개 기록을 모두 포함하며 앨범 자체 기록은 작성 시각 최신순으로 최대 3건을 반환합니다.
+          수록곡 목록은 앨범 순서대로 반환하며 기록이 없는 곡도 포함합니다.
+          해당 그룹에 본인 기록이 없으면 404 ALBUM_NOT_FOUND입니다.
+          """)
+  public ApiResponse<ArchiveAlbumDetailResponse> getAlbumDetail(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "앨범순 아카이브 목록에서 반환한 albumKey") @PathVariable String albumKey) {
+    return ApiResponse.success(
+        "누적 앨범 기록 상세 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumDetail(Long.valueOf(jwt.getSubject()), albumKey));
+  }
+
+  @GetMapping("/albums/{albumKey}/records")
+  @Operation(
+      summary = "누적 앨범 자체 기록 전체보기",
+      description =
+          """
+          해당 앨범에 직접 작성한 본인 기록 전체를 최초 작성 시각 최신순으로 반환합니다.
+          수록곡 기록은 상단 누적 합계에 포함되며, 목록에는 앨범 자체 기록만 담깁니다.
+          수록곡 기록만 있는 앨범은 빈 목록을 반환합니다.
+          """)
+  public ApiResponse<ArchiveAlbumRecordsResponse> getAlbumRecords(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "앨범순 아카이브 목록에서 반환한 albumKey") @PathVariable String albumKey) {
+    return ApiResponse.success(
+        "누적 앨범 자체 기록 전체 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumRecords(Long.valueOf(jwt.getSubject()), albumKey));
+  }
+
+  @GetMapping("/albums/{albumKey}/tracks/{trackKey}")
+  @Operation(
+      summary = "누적 수록곡 기록 조회",
+      description =
+          """
+          누적 앨범 상세에서 선택한 수록곡의 전체 기간 본인 기록을 조회합니다.
+          공개·비공개 기록을 모두 포함하고 최초 작성 시각을 한국 시간 기준 연도별로 묶습니다.
+          기록이 0건이면 곡 정보와 빈 years 배열을 반환합니다.
+          앨범에 속하지 않는 곡은 404 TRACK_NOT_FOUND입니다.
+          """)
+  public ApiResponse<ArchiveAlbumTrackResponse> getAlbumTrack(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "누적 앨범 상세 응답의 album.albumKey") @PathVariable String albumKey,
+      @Parameter(description = "수록곡 행의 trackId. null이면 MusicBrainz recordingId") @PathVariable
+          String trackKey) {
+    return ApiResponse.success(
+        "누적 수록곡 기록 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumTrack(Long.valueOf(jwt.getSubject()), albumKey, trackKey));
+  }
 
   @GetMapping("/timeline")
   @Operation(

@@ -219,6 +219,11 @@ class ArchiveDayControllerTest {
         .andExpect(jsonPath("$.data.totalRecordCount").value(1))
         .andExpect(jsonPath("$.data.albumRecords").isEmpty())
         .andExpect(jsonPath("$.data.tracks[0].recordCount").value(1));
+    mvc.perform(get("/api/archive/albums/group-c/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.totalRecordCount").value(1))
+        .andExpect(jsonPath("$.data.albumRecordCount").value(0))
+        .andExpect(jsonPath("$.data.albumRecords").isEmpty());
   }
 
   @Test
@@ -335,6 +340,141 @@ class ArchiveDayControllerTest {
     mvc.perform(get(trackPath).header("Authorization", bearer(owner)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.albumKey").value("stable-group"));
+  }
+
+  @Test
+  void returnsAllTimeAlbumArchiveWithTrackRecordsGroupedIntoTheirAlbum() throws Exception {
+    User owner = users.saveAndFlush(new User("album-archive-owner"));
+    User other = users.saveAndFlush(new User("album-archive-other"));
+    MusicItem albumA = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem albumB = items.saveAndFlush(new MusicItem(MusicType.ALBUM));
+    MusicItem trackA = items.saveAndFlush(new MusicItem(MusicType.TRACK));
+    mapAlbum(albumA, "group-a");
+    mapAlbum(albumB, "group-b");
+
+    save(owner, albumA, (byte) 8, null, true, START.minusYears(1));
+    save(owner, trackA, null, "track note", false, START.minusDays(1));
+    save(owner, trackA, (byte) 10, null, true, START);
+    save(owner, albumB, null, "latest album", false, START.plusDays(1));
+    save(other, albumB, (byte) 2, null, false, START.plusDays(2));
+    save(other, albumA, (byte) 2, null, false, START.plusDays(3));
+
+    when(albums.getAlbum(albumA.getId()))
+        .thenReturn(
+            new AlbumDetailResponse(
+                albumA.getId(),
+                new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "group-a"),
+                "Album A",
+                "Artist A",
+                null,
+                null,
+                null,
+                "cover-a",
+                List.of(
+                    new AlbumTrack(1, "1", "No records", null, null, "track-zero"),
+                    new AlbumTrack(1, "2", "Track A", null, null, "track-a"))));
+    when(albums.getAlbum(albumB.getId()))
+        .thenReturn(
+            new AlbumDetailResponse(
+                albumB.getId(),
+                new ExternalReference("MUSICBRAINZ", "RELEASE_GROUP", "group-b"),
+                "Album B",
+                "Artist B",
+                null,
+                null,
+                null,
+                "cover-b",
+                List.of()));
+    when(tracks.getTrack(trackA.getId()))
+        .thenReturn(
+            new TrackDetailResponse(
+                trackA.getId(),
+                new ExternalReference("MUSICBRAINZ", "RECORDING", "track-a"),
+                "Track A",
+                "Artist A",
+                null,
+                null,
+                "Album A",
+                "group-a",
+                "cover-a",
+                null));
+
+    String path = "/api/archive/albums";
+    mvc.perform(get(path).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albumCount").value(2))
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("group-b"))
+        .andExpect(jsonPath("$.data.albums[1].albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.albums[1].recordCount").value(3));
+
+    mvc.perform(get(path).param("sort", "MOST_RECORDED").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.albums[0].albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.albums[0].albumId").value(albumA.getId()))
+        .andExpect(jsonPath("$.data.albums[0].artistName").value("Artist A"))
+        .andExpect(jsonPath("$.data.albums[0].coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.albums[0].recordCount").value(3))
+        .andExpect(jsonPath("$.data.albums[1].recordCount").value(1));
+
+    save(owner, albumA, null, "old comment", false, START.minusDays(3));
+    save(owner, albumA, (byte) 6, null, true, START.minusDays(2));
+    save(owner, albumA, null, "latest comment", true, START.plusDays(1));
+
+    mvc.perform(get(path + "/group-a")).andExpect(status().isUnauthorized());
+    mvc.perform(get(path + "/group-a").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.album.albumKey").value("group-a"))
+        .andExpect(jsonPath("$.data.totalRecordCount").value(6))
+        .andExpect(jsonPath("$.data.albumRecordCount").value(4))
+        .andExpect(jsonPath("$.data.trackRecordCount").value(2))
+        .andExpect(jsonPath("$.data.albumRecords.length()").value(3))
+        .andExpect(jsonPath("$.data.albumRecords[0].content").value("latest comment"))
+        .andExpect(jsonPath("$.data.albumRecords[1].rating").value(3.0))
+        .andExpect(jsonPath("$.data.tracks[0].recordCount").value(0))
+        .andExpect(jsonPath("$.data.tracks[1].trackId").value(trackA.getId()))
+        .andExpect(jsonPath("$.data.tracks[1].recordCount").value(2));
+
+    mvc.perform(get(path + "/group-a/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.totalRecordCount").value(6))
+        .andExpect(jsonPath("$.data.albumRecords.length()").value(4))
+        .andExpect(jsonPath("$.data.albumRecords[3].rating").value(4.0));
+    mvc.perform(get(path + "/unknown/records").header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ALBUM_NOT_FOUND"));
+
+    LocalDateTime koreaNewYear =
+        LocalDate.of(2026, 1, 1)
+            .atStartOfDay(ZoneId.of("Asia/Seoul"))
+            .withZoneSameInstant(ZoneId.systemDefault())
+            .toLocalDateTime();
+    save(owner, trackA, null, "previous year", true, koreaNewYear.minusSeconds(1));
+    save(other, trackA, (byte) 2, null, false, START.plusDays(2));
+
+    String trackPath = path + "/group-a/tracks/";
+    mvc.perform(get(trackPath + trackA.getId())).andExpect(status().isUnauthorized());
+    mvc.perform(get(trackPath + trackA.getId()).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.track.trackId").value(trackA.getId()))
+        .andExpect(jsonPath("$.data.track.trackNumber").value("2"))
+        .andExpect(jsonPath("$.data.track.artistName").value("Artist A"))
+        .andExpect(jsonPath("$.data.track.coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.recordCount").value(3))
+        .andExpect(jsonPath("$.data.years[0].year").value(2026))
+        .andExpect(jsonPath("$.data.years[0].records[0].rating").value(5.0))
+        .andExpect(jsonPath("$.data.years[0].records[1].content").value("track note"))
+        .andExpect(jsonPath("$.data.years[1].year").value(2025))
+        .andExpect(jsonPath("$.data.years[1].records[0].content").value("previous year"));
+    mvc.perform(get(trackPath + "track-zero").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.track.recordingId").value("track-zero"))
+        .andExpect(jsonPath("$.data.track.trackNumber").value("1"))
+        .andExpect(jsonPath("$.data.recordCount").value(0))
+        .andExpect(jsonPath("$.data.years").isEmpty());
+    mvc.perform(
+            get(path + "/group-b/tracks/" + trackA.getId()).header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("TRACK_NOT_FOUND"));
   }
 
   private void mapAlbum(MusicItem album, String group) {
