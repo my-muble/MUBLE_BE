@@ -5,6 +5,7 @@ import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse.AlbumCard;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumRecordsResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumTrackResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.Album;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse.AlbumRecord;
@@ -204,6 +205,77 @@ public class ArchiveTimelineService {
         records.albumRecords());
   }
 
+  @Transactional
+  public ArchiveAlbumTrackResponse getAlbumTrack(Long userId, String albumKey, String trackKey) {
+    requireUser(userId);
+    AlbumRecords album = collectAlbumRecords(archiveRepository.findAlbumRows(userId), albumKey);
+    Track selected =
+        tracksFor(album).stream()
+            .filter(
+                track ->
+                    trackKey.equals(track.recordingId())
+                        || (track.trackId() != null && trackKey.equals(track.trackId().toString())))
+            .findFirst()
+            .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+
+    String recordingId = selected.recordingId();
+    Long trackId = selected.trackId();
+    if (trackId == null && recordingId != null) {
+      trackId =
+          externalIds
+              .findByProviderAndExternalIdTypeAndExternalId(
+                  MusicProvider.MUSICBRAINZ, ExternalIdType.RECORDING, recordingId)
+              .map(mapping -> mapping.getMusicItem().getId())
+              .orElse(null);
+    }
+    AlbumTrack catalogTrack =
+        recordingId == null
+            ? null
+            : album.metadata().tracks().stream()
+                .filter(track -> recordingId.equals(track.recordingId()))
+                .findFirst()
+                .orElse(null);
+    TrackCounter recordedTrack =
+        album
+            .recordedTracks()
+            .get(recordingId == null ? fallbackKey(MusicType.TRACK, trackId) : recordingId);
+    String artistName = catalogTrack == null ? null : catalogTrack.artistName();
+    if (artistName == null && recordedTrack != null) {
+      artistName = recordedTrack.artistName;
+    }
+    var track =
+        new ArchiveAlbumTrackResponse.Track(
+            trackId,
+            recordingId,
+            selected.discNumber(),
+            selected.trackNumber(),
+            selected.title(),
+            artistName == null ? album.metadata().artistName() : artistName,
+            album.metadata().coverImageUrl());
+
+    List<ArchiveRecordRow> rows =
+        trackId == null
+            ? List.of()
+            : archiveRepository.findMusicRows(userId, trackId, MusicType.TRACK);
+    Map<Integer, List<TrackRecord>> byYear = new LinkedHashMap<>();
+    for (ArchiveRecordRow row : rows) {
+      OffsetDateTime createdAt = koreaTime(row.createdAt());
+      byYear
+          .computeIfAbsent(createdAt.getYear(), year -> new ArrayList<>())
+          .add(
+              new TrackRecord(
+                  row.recordId(), createdAt, rating(row.ratingHalfSteps()), row.content()));
+    }
+    var years =
+        byYear.entrySet().stream()
+            .map(
+                group ->
+                    new ArchiveAlbumTrackResponse.YearGroup(
+                        group.getKey(), List.copyOf(group.getValue())))
+            .toList();
+    return new ArchiveAlbumTrackResponse(albumKey, track, rows.size(), years);
+  }
+
   private AlbumRecords collectAlbumRecords(List<ArchiveRecordRow> rows, String albumKey) {
     List<AlbumRecord> albumRecords = new ArrayList<>();
     Map<String, TrackCounter> recordedTracks = new LinkedHashMap<>();
@@ -238,7 +310,10 @@ public class ArchiveTimelineService {
                 trackKey,
                 ignored ->
                     new TrackCounter(
-                        row.musicItemId(), recordingId, track == null ? null : track.title()))
+                        row.musicItemId(),
+                        recordingId,
+                        track == null ? null : track.title(),
+                        track == null ? null : track.artistName()))
             .count++;
       }
     }
@@ -520,12 +595,14 @@ public class ArchiveTimelineService {
     private final Long trackId;
     private final String recordingId;
     private final String title;
+    private final String artistName;
     private long count;
 
-    private TrackCounter(Long trackId, String recordingId, String title) {
+    private TrackCounter(Long trackId, String recordingId, String title, String artistName) {
       this.trackId = trackId;
       this.recordingId = recordingId;
       this.title = title;
+      this.artistName = artistName;
     }
   }
 

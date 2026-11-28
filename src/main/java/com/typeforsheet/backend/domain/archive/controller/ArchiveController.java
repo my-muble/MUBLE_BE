@@ -4,6 +4,7 @@ import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumDetailResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumListResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumRecordsResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumSort;
+import com.typeforsheet.backend.domain.archive.dto.ArchiveAlbumTrackResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayAlbumResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayResponse;
 import com.typeforsheet.backend.domain.archive.dto.ArchiveDayTrackResponse;
@@ -99,6 +100,26 @@ public class ArchiveController {
     return ApiResponse.success(
         "누적 앨범 자체 기록 전체 조회에 성공했습니다.",
         archiveTimelineService.getAlbumRecords(Long.valueOf(jwt.getSubject()), albumKey));
+  }
+
+  @GetMapping("/albums/{albumKey}/tracks/{trackKey}")
+  @Operation(
+      summary = "누적 수록곡 기록 조회",
+      description =
+          """
+          누적 앨범 상세에서 선택한 수록곡의 전체 기간 본인 기록을 조회합니다.
+          공개·비공개 기록을 모두 포함하고 최초 작성 시각을 한국 시간 기준 연도별로 묶습니다.
+          기록이 0건이면 곡 정보와 빈 years 배열을 반환합니다.
+          앨범에 속하지 않는 곡은 404 TRACK_NOT_FOUND입니다.
+          """)
+  public ApiResponse<ArchiveAlbumTrackResponse> getAlbumTrack(
+      @AuthenticationPrincipal Jwt jwt,
+      @Parameter(description = "누적 앨범 상세 응답의 album.albumKey") @PathVariable String albumKey,
+      @Parameter(description = "수록곡 행의 trackId. null이면 MusicBrainz recordingId") @PathVariable
+          String trackKey) {
+    return ApiResponse.success(
+        "누적 수록곡 기록 조회에 성공했습니다.",
+        archiveTimelineService.getAlbumTrack(Long.valueOf(jwt.getSubject()), albumKey, trackKey));
   }
 
   @GetMapping("/timeline")

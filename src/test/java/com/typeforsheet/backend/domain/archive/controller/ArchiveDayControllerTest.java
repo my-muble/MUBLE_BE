@@ -436,6 +436,39 @@ class ArchiveDayControllerTest {
     mvc.perform(get(path + "/unknown/records").header("Authorization", bearer(owner)))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("ALBUM_NOT_FOUND"));
+
+    LocalDateTime koreaNewYear =
+        LocalDate.of(2026, 1, 1)
+            .atStartOfDay(ZoneId.of("Asia/Seoul"))
+            .withZoneSameInstant(ZoneId.systemDefault())
+            .toLocalDateTime();
+    save(owner, trackA, null, "previous year", true, koreaNewYear.minusSeconds(1));
+    save(other, trackA, (byte) 2, null, false, START.plusDays(2));
+
+    String trackPath = path + "/group-a/tracks/";
+    mvc.perform(get(trackPath + trackA.getId())).andExpect(status().isUnauthorized());
+    mvc.perform(get(trackPath + trackA.getId()).header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.track.trackId").value(trackA.getId()))
+        .andExpect(jsonPath("$.data.track.trackNumber").value("2"))
+        .andExpect(jsonPath("$.data.track.artistName").value("Artist A"))
+        .andExpect(jsonPath("$.data.track.coverImageUrl").value("cover-a"))
+        .andExpect(jsonPath("$.data.recordCount").value(3))
+        .andExpect(jsonPath("$.data.years[0].year").value(2026))
+        .andExpect(jsonPath("$.data.years[0].records[0].rating").value(5.0))
+        .andExpect(jsonPath("$.data.years[0].records[1].content").value("track note"))
+        .andExpect(jsonPath("$.data.years[1].year").value(2025))
+        .andExpect(jsonPath("$.data.years[1].records[0].content").value("previous year"));
+    mvc.perform(get(trackPath + "track-zero").header("Authorization", bearer(owner)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.track.recordingId").value("track-zero"))
+        .andExpect(jsonPath("$.data.track.trackNumber").value("1"))
+        .andExpect(jsonPath("$.data.recordCount").value(0))
+        .andExpect(jsonPath("$.data.years").isEmpty());
+    mvc.perform(
+            get(path + "/group-b/tracks/" + trackA.getId()).header("Authorization", bearer(owner)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("TRACK_NOT_FOUND"));
   }
 
   private void mapAlbum(MusicItem album, String group) {
